@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+      # Pack the CLI and run it from a clean install to prove the published
+      # artifact is self-contained (commander is the only runtime dependency).
+      - name: Verify packaged CLI
+        run: |
+          set -e
+          npm run build
+          tgz=$(npm pack --silent)
+          mkdir -p /tmp/pkgtest && cd /tmp/pkgtest && npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE/$tgz"
+          ./node_modules/.bin/hedge --version
+          ./node_modules/.bin/hedge --help >/dev/null

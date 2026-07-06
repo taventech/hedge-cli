@@ -1,0 +1,28 @@
+{
+  "name": "hedge-broker",
+  "version": "0.1.0",
+  "description": "Command-line tool for the Hedge broker portal. Submit risks, check appetite, track quotes and policies.",
+  "type": "module",
+  "bin": { "hedge": "dist/index.js" },
+  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "author": "Hedge Specialty Insurance",
+  "homepage": "https://github.com/taventech/hedge-cli#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/taventech/hedge-cli.git" },
+  "bugs": { "url": "https://github.com/taventech/hedge-cli/issues" },
+  "keywords": ["hedge", "insurance", "broker", "cli", "submissions", "commercial-insurance", "appetite"],
+  "publishConfig": { "access": "public" },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8",
+    "typescript": "^5",
+    "@types/node": "^22"
+  }
+}
