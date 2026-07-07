@@ -36,13 +36,13 @@ export function registerQuotes(program: Command): void {
 
   program
     .command("request-quote <submissionId> <sessionId>")
-    .description("Close a carrier session — request an indication then a quote")
+    .description("Close a carrier session and request an indication then a quote")
     .action(async (submissionId, sessionId) => {
       const ctx = makeCtx(program.opts());
       const res = await apiRequest<any>(ctx.client, "POST", `/broker/submissions/${submissionId}/api-quotes/sessions/${sessionId}/close`);
       if (ctx.json) return printJson(res);
       process.stdout.write(`outcome: ${res.outcome} | status: ${res.status}${res.quote_pdf_url ? " | quote: " + res.quote_pdf_url : ""}\n`);
       if ((res.missing_required_questions_json || []).length)
-        process.stdout.write(`still needs ${(res.missing_required_questions_json || []).length} answers — use \`hedge answer\`\n`);
+        process.stdout.write(`still needs ${(res.missing_required_questions_json || []).length} answers; use \`hedge answer\`\n`);
     });
 }

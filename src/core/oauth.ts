@@ -93,7 +93,7 @@ export async function deviceLogin(opts: {
     if (pb.error === "slow_down") { interval += 5000; continue; }
     throw new Error(pb.error === "access_denied" ? "Access was denied" : (pb.error || `Login failed (${poll.status})`));
   }
-  throw new Error("Login timed out — run the command again");
+  throw new Error("Login timed out. Run the command again");
 }
 
 /**
