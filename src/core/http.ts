@@ -1,5 +1,4 @@
 import { writeFileSync } from "node:fs";
-import { basename } from "node:path";
 import { clearToken, loadToken, saveToken, type CliConfig, type StoredToken } from "./config.js";
 import { refresh } from "./oauth.js";
 
@@ -7,6 +6,39 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
+}
+
+// FastAPI error `detail` can be a string, a list of validation errors
+// ({loc, msg, type}), or an arbitrary object. Render each readably; a bare
+// String() on an object would print "[object Object]".
+function renderErrorDetail(detail: unknown, fallback: string): string {
+  if (detail == null) return fallback;
+  if (typeof detail === "string") return detail.trim() || fallback;
+  if (Array.isArray(detail)) {
+    const lines = detail.map((entry) => {
+      if (entry && typeof entry === "object" && "msg" in entry) {
+        const loc = Array.isArray((entry as { loc?: unknown }).loc) ? ((entry as { loc: unknown[] }).loc).join(".") : "";
+        return (loc ? loc + ": " : "") + String((entry as { msg: unknown }).msg);
+      }
+      return JSON.stringify(entry);
+    });
+    return lines.join("\n") || fallback;
+  }
+  if (typeof detail === "object") return JSON.stringify(detail);
+  return String(detail);
+}
+
+// Shared non-2xx handling: pull detail/error off a parsed JSON body (or use
+// the raw text) and build the ApiError.
+function apiErrorFrom(status: number, parsed: unknown, fallback: string): ApiError {
+  let detail: unknown = undefined;
+  if (parsed && typeof parsed === "object") {
+    const obj = parsed as { detail?: unknown; error?: unknown };
+    detail = obj.detail ?? obj.error;
+  } else if (typeof parsed === "string") {
+    detail = parsed;
+  }
+  return new ApiError(status, renderErrorDetail(detail, fallback));
 }
 
 export interface ClientOptions {
@@ -69,13 +101,7 @@ export async function apiRequest<T = unknown>(
       parsed = text;
     }
   }
-  if (!res.ok) {
-    const detail =
-      (parsed && typeof parsed === "object" && "detail" in parsed && (parsed as { detail?: unknown }).detail) ||
-      (parsed && typeof parsed === "object" && "error" in parsed && (parsed as { error?: unknown }).error) ||
-      (typeof parsed === "string" ? parsed : `Request failed (${res.status})`);
-    throw new ApiError(res.status, String(detail));
-  }
+  if (!res.ok) throw apiErrorFrom(res.status, parsed, `Request failed (${res.status})`);
   return parsed as T;
 }
 
@@ -101,13 +127,18 @@ export async function multipartRequest<T = unknown>(
       parsed = text; // HTML error pages (502s from a proxy) are not JSON
     }
   }
-  if (!res.ok) {
-    const detail =
-      (parsed && typeof parsed === "object" && "detail" in parsed && (parsed as any).detail) ||
-      (typeof parsed === "string" && parsed.trim() ? parsed.trim() : `Upload failed (${res.status})`);
-    throw new ApiError(res.status, String(detail));
-  }
+  if (!res.ok) throw apiErrorFrom(res.status, parsed, `Upload failed (${res.status})`);
   return parsed as T;
+}
+
+// Server-derived filenames are untrusted: keep only the final path segment
+// (either separator style) and strip control chars plus the characters
+// Windows forbids, so the name can never escape the target directory.
+function sanitizeFilename(name: string): string {
+  const last = name.replace(/\\/g, "/").split("/").pop() ?? "";
+  const cleaned = last.replace(/[:*?"<>|\u0000-\u001f]/g, "_").trim();
+  if (!cleaned || cleaned === "." || cleaned === "..") return "";
+  return cleaned;
 }
 
 // Pulls a usable filename out of a Content-Disposition header (RFC 5987
@@ -152,14 +183,12 @@ export async function downloadRequest(
         parsed = text;
       }
     }
-    const detail =
-      (parsed && typeof parsed === "object" && "detail" in parsed && (parsed as { detail?: unknown }).detail) ||
-      (typeof parsed === "string" && parsed.trim() ? parsed.trim() : `Download failed (${res.status})`);
-    throw new ApiError(res.status, String(detail));
+    throw apiErrorFrom(res.status, parsed, `Download failed (${res.status})`);
   }
-  // basename() so a server-supplied filename can never escape the cwd.
+  // Sanitized so a server-supplied filename can never escape the cwd.
   const serverName = dispositionFilename(res.headers.get("content-disposition"));
-  const target = outPath ?? (serverName ? basename(serverName) : undefined) ?? fallbackName;
+  const safeName = serverName ? sanitizeFilename(serverName) : "";
+  const target = outPath ?? (safeName || undefined) ?? fallbackName;
   if (!target) throw new ApiError(500, "No output filename (pass -o <file>)");
   writeFileSync(target, Buffer.from(await res.arrayBuffer()));
   return target;

@@ -105,14 +105,16 @@ hedge documents <submission-id>
 hedge download <document-id> -o quote.pdf
 ```
 
-When any address flag is present, `--state` fills the mailing address state. With `--state` alone it is sent as the submission's top-level `primary_state`.
+When a mailing address is in play, `--state` fills the mailing address state; the address must be complete (`--address`, `--city`, `--state`, `--zip`, counting fields supplied via `--body`). With `--state` alone it is sent as the submission's top-level `primary_state`.
 
-Prefer building the request in a file (or another program)? Send a full JSON body; explicit flags still win over matching top-level keys:
+Prefer building the request in a file (or another program)? Send a full JSON body. Explicit flags still win: top-level flag values replace matching body keys, applicant flags merge over the body's applicant, and address flags merge into its mailing_address:
 
 ```bash
 hedge submit --body ./submission.json
 cat submission.json | hedge submit --body - --effective 2026-09-01
 ```
+
+Every `submit` sends an `Idempotency-Key` header (a random UUID each run). Replay only engages when the same key is re-sent within 24 hours, so a scripted retry that must not double-create should pass its own key with `--idempotency-key <key>`.
 
 ## Signing in
 

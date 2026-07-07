@@ -64,7 +64,11 @@ export function registerSubmissions(program: Command): void {
     .option("--producer-email <email>", "producing broker to attribute (required for brokerage API-client credentials)")
     .option(
       "--body <file|->",
-      "full JSON request body from a file, or - for stdin. Precedence: flags win; a top-level flag value replaces the matching body key, and applicant flags merge over the body's applicant",
+      "full JSON request body from a file, or - for stdin. Precedence: flags win; a top-level flag value replaces the matching body key, applicant flags merge over the body's applicant, and address flags merge into its mailing_address",
+    )
+    .option(
+      "--idempotency-key <key>",
+      "Idempotency-Key header value (default: a random UUID per invocation). Re-send the same key within 24h to replay the original response instead of creating a duplicate",
     )
     .action(async (opts) => {
       const ctx = makeCtx(program.opts());
@@ -83,27 +87,53 @@ export function registerSubmissions(program: Command): void {
       if (opts.contactEmail) applicant.contact_email = opts.contactEmail;
       if (opts.contactPhone) applicant.contact_phone = opts.contactPhone;
 
-      const address: Record<string, unknown> = {};
-      if (opts.address) address.line1 = opts.address;
-      if (opts.address2) address.line2 = opts.address2;
-      if (opts.city) address.city = opts.city;
-      if (opts.zip) address.zip = opts.zip;
-      const hasAddress = Object.keys(address).length > 0;
+      const addressFlags: Record<string, unknown> = {};
+      if (opts.address) addressFlags.line1 = opts.address;
+      if (opts.address2) addressFlags.line2 = opts.address2;
+      if (opts.city) addressFlags.city = opts.city;
+      if (opts.zip) addressFlags.zip = opts.zip;
+      const hasAddressFlags = Object.keys(addressFlags).length > 0;
       const state = opts.state ? String(opts.state).trim().toUpperCase() : undefined;
-      // With address parts the state belongs on the mailing address; sending
-      // top-level primary_state too would just trip the 422 conflict check.
-      if (hasAddress) {
-        if (state) address.state = state;
-        applicant.mailing_address = address;
-      } else if (state) {
-        body.primary_state = state;
+
+      const bodyApplicant =
+        body.applicant && typeof body.applicant === "object" && !Array.isArray(body.applicant)
+          ? (body.applicant as Record<string, unknown>)
+          : undefined;
+      const bodyAddress =
+        bodyApplicant?.mailing_address && typeof bodyApplicant.mailing_address === "object" && !Array.isArray(bodyApplicant.mailing_address)
+          ? (bodyApplicant.mailing_address as Record<string, unknown>)
+          : undefined;
+
+      // Address flags merge INTO the body's mailing_address (nested merge),
+      // so --body plus one corrected field keeps the rest of the address.
+      let mailing: Record<string, unknown> | undefined = bodyAddress ? { ...bodyAddress } : undefined;
+      if (hasAddressFlags) mailing = { ...(mailing ?? {}), ...addressFlags };
+      if (state) {
+        if (mailing) {
+          // Flags win: --state lands on the mailing address rather than as a
+          // conflicting top-level primary_state (which would 422). A
+          // primary_state already present in the body is kept in agreement.
+          mailing.state = state;
+          if (body.primary_state != null) body.primary_state = state;
+        } else {
+          body.primary_state = state;
+        }
       }
+      if (hasAddressFlags) {
+        // The API requires a complete mailing address (line1, city, state,
+        // zip); a partial one is a guaranteed 422, so fail fast instead.
+        const flagFor: Record<string, string> = { line1: "--address", city: "--city", state: "--state", zip: "--zip" };
+        const missing = Object.keys(flagFor).filter((k) => !mailing?.[k]).map((k) => flagFor[k]);
+        if (missing.length) {
+          throw new Error(
+            "--address, --city, --state and --zip must be provided together (missing " + missing.join(", ") + "; fields already in --body's mailing_address count)",
+          );
+        }
+      }
+      if (mailing && (hasAddressFlags || state)) applicant.mailing_address = mailing;
+
       if (Object.keys(applicant).length > 0) {
-        const existing =
-          body.applicant && typeof body.applicant === "object" && !Array.isArray(body.applicant)
-            ? (body.applicant as Record<string, unknown>)
-            : {};
-        body.applicant = { ...existing, ...applicant };
+        body.applicant = { ...(bodyApplicant ?? {}), ...applicant };
       }
 
       if (opts.narrative) body.narrative = opts.narrative;
@@ -121,9 +151,10 @@ export function registerSubmissions(program: Command): void {
 
       const res = await apiRequest<Record<string, unknown>>(ctx.client, "POST", "/broker/submissions", {
         body,
-        // Fresh key per invocation; the API replays the original response when
-        // the same key is retried within 24h (per brokerage).
-        headers: { "Idempotency-Key": randomUUID() },
+        // Random per invocation unless the caller supplies a key. The API
+        // replays the original response when the same key is re-sent within
+        // 24h (per brokerage), so scripted retries should pass their own key.
+        headers: { "Idempotency-Key": opts.idempotencyKey ?? randomUUID() },
       });
       if (ctx.json) return printJson(res);
       process.stdout.write(kv({ submission_id: res.submission_id, state: res.state, status: res.status_label }) + "\n");
