@@ -10,7 +10,7 @@ const program = new Command();
 program
   .name("hedge")
   .description("Submit risks to Hedge and track them from your terminal.")
-  .version("0.3.0")
+  .version("0.3.1")
   .option("--staging", "use the staging environment")
   .option("--json", "output raw JSON (for scripting)");
 
