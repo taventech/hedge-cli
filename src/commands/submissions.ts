@@ -188,6 +188,19 @@ export function registerSubmissions(program: Command): void {
         process.stdout.write("\nMarkets:\n" + table(r.markets.map((m: any) => ({
           market: m.market_name, ready: m.ready ? "yes" : "no", needs_from_you: (m.needs_from_you || []).join("; "),
         })), ["market", "ready", "needs_from_you"]) + "\n");
+      } else {
+        // An empty markets list is ambiguous without the server's
+        // marketing_status: matching runs for ~5 minutes after finalize.
+        const hint = typeof r.marketing_hint === "string" && r.marketing_hint ? r.marketing_hint : null;
+        if (r.marketing_status === "matching") {
+          process.stdout.write("\nNo markets yet - " + (hint ?? "Hedge is matching carrier markets now (usually ~5 minutes after finalize); re-run this in a few minutes.") + "\n");
+        } else if (r.marketing_status === "not_started") {
+          process.stdout.write("\nNo markets yet - " + (hint ?? "run hedge finalize " + submissionId + " to start marketing.") + "\n");
+        } else if (r.marketing_status === "no_markets_matched") {
+          process.stdout.write("\nNo markets attached - " + (hint ?? "Hedge is reviewing options for this risk and will follow up.") + "\n");
+        } else {
+          process.stdout.write("\nNo markets yet. If you just finalized, matching usually completes within ~5 minutes - re-run this shortly or use hedge status " + submissionId + ".\n");
+        }
       }
       if (r.carrier_api_sessions?.length) {
         process.stdout.write("\nInstant-quote carriers:\n" + table(r.carrier_api_sessions.map((s: any) => ({
@@ -208,6 +221,8 @@ export function registerSubmissions(program: Command): void {
         process.stdout.write("\nMarkets:\n" + table(s.markets.flatMap((m: any) => (m.lines || []).map((l: any) => ({
           carrier: m.carrier_name, line: l.lob_label ?? l.lob_slug, status: l.status_label ?? l.status, quote: l.quote_premium ?? "",
         }))), ["carrier", "line", "status", "quote"]) + "\n");
+      } else {
+        process.stdout.write("\nNo markets attached yet. Matching usually completes within ~5 minutes of finalize - re-run this shortly (or check hedge requirements " + submissionId + ").\n");
       }
       const byStatus = s.status_summary?.by_status;
       if (byStatus && Object.keys(byStatus).length) {
@@ -240,11 +255,51 @@ export function registerSubmissions(program: Command): void {
   program
     .command("finalize <submissionId>")
     .description("Start marketing the submission to carriers")
-    .action(async (submissionId) => {
+    .option("--wait", "poll until markets attach (usually ~5 minutes), then print them")
+    .option("--timeout <minutes>", "how long --wait polls before giving up", "8")
+    .action(async (submissionId, opts) => {
       const ctx = makeCtx(program.opts());
-      const r = await apiRequest<Record<string, unknown>>(ctx.client, "POST", `/broker/submissions/${submissionId}/finalize`);
-      if (ctx.json) return printJson(r);
-      process.stdout.write("Marketing started. Track with: hedge status " + submissionId + "\n");
+      const r = await apiRequest<Record<string, any>>(ctx.client, "POST", `/broker/submissions/${submissionId}/finalize`);
+      if (ctx.json && !opts.wait) return printJson(r);
+
+      if (!opts.wait) {
+        // Matching is asynchronous — set the expectation so nobody polls
+        // requirements 10 seconds from now and reads "empty" as "no appetite".
+        const wait = Number(r.typical_wait_seconds) > 0 ? Math.round(Number(r.typical_wait_seconds) / 60) : 5;
+        process.stdout.write(
+          `Marketing started. Markets usually attach within ~${wait} minutes.\n` +
+          `Track with: hedge status ${submissionId}  (or use finalize --wait next time)\n`,
+        );
+        return;
+      }
+
+      const timeoutMin = intFlag(opts.timeout, "--timeout");
+      const deadline = Date.now() + Math.max(1, timeoutMin) * 60_000;
+      process.stdout.write("Marketing started - waiting for markets to attach (usually ~5 minutes)");
+      let markets: any[] = [];
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 15_000));
+        process.stdout.write(".");
+        const s = await apiRequest<Record<string, any>>(ctx.client, "GET", `/broker/submissions/${submissionId}`);
+        if (s.markets?.length) {
+          markets = s.markets;
+          break;
+        }
+      }
+      process.stdout.write("\n");
+      if (!markets.length) {
+        process.stdout.write(
+          `Still matching after ${timeoutMin} minutes - this can occasionally take longer.\n` +
+          `Check in with: hedge status ${submissionId}  or  hedge requirements ${submissionId}\n`,
+        );
+        return;
+      }
+      const rows = markets.flatMap((m: any) => (m.lines || []).map((l: any) => ({
+        carrier: m.carrier_name, line: l.lob_label ?? l.lob_slug, status: l.status_label ?? l.status,
+      })));
+      if (ctx.json) return printJson({ finalize: r, markets });
+      process.stdout.write(`Matched ${markets.length} market(s):\n\n` + table(rows, ["carrier", "line", "status"]) + "\n");
+      process.stdout.write("\nNext: hedge requirements " + submissionId + " shows what each market still needs from you.\n");
     });
 
   program
