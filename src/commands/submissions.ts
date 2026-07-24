@@ -184,6 +184,9 @@ export function registerSubmissions(program: Command): void {
       const r = await apiRequest<Record<string, any>>(ctx.client, "GET", `/broker/submissions/${submissionId}/requirements`);
       if (ctx.json) return printJson(r);
       process.stdout.write(kv({ insured: r.insured_name, lines: (r.lines || []).join(", "), state: r.state, forms: (r.forms || []).join(", ") }) + "\n");
+      if (r.forms?.length) {
+        process.stdout.write("(download blanks with: hedge form <form_key>)\n");
+      }
       if (r.markets?.length) {
         process.stdout.write("\nMarkets:\n" + table(r.markets.map((m: any) => ({
           market: m.market_name, ready: m.ready ? "yes" : "no", needs_from_you: (m.needs_from_you || []).join("; "),
@@ -300,6 +303,35 @@ export function registerSubmissions(program: Command): void {
       if (ctx.json) return printJson({ finalize: r, markets });
       process.stdout.write(`Matched ${markets.length} market(s):\n\n` + table(rows, ["carrier", "line", "status"]) + "\n");
       process.stdout.write("\nNext: hedge requirements " + submissionId + " shows what each market still needs from you.\n");
+    });
+
+  program
+    .command("forms [search]")
+    .description('Search the blank application-form catalog, e.g. hedge forms "liquor"')
+    .action(async (search) => {
+      const ctx = makeCtx(program.opts());
+      const rows = await apiRequest<Record<string, any>[]>(ctx.client, "GET", "/broker/forms", {
+        query: { q: search },
+      });
+      if (ctx.json) return printJson(rows);
+      if (!rows.length) {
+        process.stdout.write("No forms matched" + (search ? ` "${search}"` : "") + ".\n");
+        return;
+      }
+      process.stdout.write(table(rows.map((f) => ({
+        form_key: f.form_key, title: f.title ?? "", acord: f.is_acord ? "yes" : "", pages: f.page_count ?? "",
+      })), ["form_key", "title", "acord", "pages"]) + "\n");
+      process.stdout.write("\nDownload a blank with: hedge form <form_key>\n");
+    });
+
+  program
+    .command("form <formKey>")
+    .description("Download a blank application form by its catalog key (the keys `hedge requirements` lists)")
+    .option("-o, --output <file>", "output file (default <formKey>.pdf)")
+    .action(async (formKey, opts) => {
+      const ctx = makeCtx(program.opts());
+      const out = await downloadRequest(ctx.client, "GET", `/broker/forms/${encodeURIComponent(formKey)}/pdf`, opts.output, `${formKey}.pdf`);
+      process.stdout.write("Saved " + out + "\n");
     });
 
   program
