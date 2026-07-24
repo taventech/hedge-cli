@@ -278,31 +278,50 @@ export function registerSubmissions(program: Command): void {
 
       const timeoutMin = intFlag(opts.timeout, "--timeout");
       const deadline = Date.now() + Math.max(1, timeoutMin) * 60_000;
-      process.stdout.write("Marketing started - waiting for markets to attach (usually ~5 minutes)");
-      let markets: any[] = [];
+      process.stdout.write("Marketing started - waiting for markets to match (usually ~5 minutes)");
+      // Poll the REQUIREMENTS view, not the submission detail: the detail's
+      // markets list only shows markets Hedge has actually contacted, which
+      // for approval-gated brokerages can be well after matching completes.
+      // requirements.marketing_status flips to "matched" the moment lanes
+      // attach (and its markets[] carries per-market readiness).
+      let req: Record<string, any> | null = null;
+      let noMarkets = false;
       while (Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 15_000));
         process.stdout.write(".");
-        const s = await apiRequest<Record<string, any>>(ctx.client, "GET", `/broker/submissions/${submissionId}`);
-        if (s.markets?.length) {
-          markets = s.markets;
+        const view = await apiRequest<Record<string, any>>(ctx.client, "GET", `/broker/submissions/${submissionId}/requirements`);
+        if (view.marketing_status === "matched" || view.markets?.length) {
+          req = view;
+          break;
+        }
+        if (view.marketing_status === "no_markets_matched") {
+          req = view;
+          noMarkets = true;
           break;
         }
       }
       process.stdout.write("\n");
-      if (!markets.length) {
+      if (!req) {
         process.stdout.write(
           `Still matching after ${timeoutMin} minutes - this can occasionally take longer.\n` +
-          `Check in with: hedge status ${submissionId}  or  hedge requirements ${submissionId}\n`,
+          `Check in with: hedge requirements ${submissionId}\n`,
         );
         return;
       }
-      const rows = markets.flatMap((m: any) => (m.lines || []).map((l: any) => ({
-        carrier: m.carrier_name, line: l.lob_label ?? l.lob_slug, status: l.status_label ?? l.status,
-      })));
-      if (ctx.json) return printJson({ finalize: r, markets });
-      process.stdout.write(`Matched ${markets.length} market(s):\n\n` + table(rows, ["carrier", "line", "status"]) + "\n");
-      process.stdout.write("\nNext: hedge requirements " + submissionId + " shows what each market still needs from you.\n");
+      if (noMarkets) {
+        if (ctx.json) return printJson({ finalize: r, requirements: req });
+        process.stdout.write((req.marketing_hint ?? "No carrier lanes attached - Hedge is reviewing options for this risk and will follow up.") + "\n");
+        return;
+      }
+      if (ctx.json) return printJson({ finalize: r, requirements: req });
+      const rows = (req.markets || []).map((m: any) => ({
+        market: m.market_name, ready: m.ready ? "yes" : "no", needs_from_you: (m.needs_from_you || []).join("; "),
+      }));
+      process.stdout.write(`Matched ${rows.length} market(s):\n\n` + table(rows, ["market", "ready", "needs_from_you"]) + "\n");
+      if (req.forms?.length) {
+        process.stdout.write("\nForms Hedge prepares: " + req.forms.join(", ") + "\n(download blanks with: hedge form <form_key>)\n");
+      }
+      process.stdout.write("\nTrack sends and quotes with: hedge status " + submissionId + "\n");
     });
 
   program
