@@ -15,6 +15,12 @@ export interface StoredToken {
   // Static credential mode (e.g. a Bindly org API key) instead of OAuth.
   // When set, callers send it as a header rather than refreshing a bearer.
   api_key?: string;
+  // Machine credential (client_credentials grant). The grant issues no
+  // refresh token, so an expired access token is renewed by re-exchanging
+  // the stored client_secret. Same 0600 file, same sensitivity class as a
+  // refresh token.
+  grant?: "client_credentials";
+  client_secret?: string;
 }
 
 export interface CliConfig {

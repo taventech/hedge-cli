@@ -1,7 +1,7 @@
 {
   "name": "hedge-broker",
-  "version": "0.3.2",
-  "description": "Command-line tool for the Hedge broker portal. Submit risks, check appetite, track quotes and policies.",
+  "version": "0.4.0",
+  "description": "Command-line tool for Hedge. Send a risk (text and PDFs), read the markets Hedge is trying, follow the thread, and bind, from your terminal or a script.",
   "type": "module",
   "bin": { "hedge": "dist/index.js" },
   "files": ["dist", "README.md", "CHANGELOG.md"],
