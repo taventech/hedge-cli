@@ -4,6 +4,7 @@ import { basename } from "node:path";
 import type { Command } from "commander";
 import { apiRequest, downloadRequest, multipartRequest, table, kv, printJson } from "../core/index.js";
 import { makeCtx } from "../context.js";
+import { nextAfterCreate, printWarnings } from "./intake.js";
 
 const POLICY_DOC_KINDS = ["binder", "policy", "declarations"];
 
@@ -37,7 +38,10 @@ function formatBytes(size: unknown): string {
 export function registerSubmissions(program: Command): void {
   program
     .command("submit")
-    .description("Create a submission (does not market it; run `finalize` when ready)")
+    .description(
+      "Create a submission from structured fields and START the run: Hedge matches appetite, emails the producer the clearance, opens the lanes and quotes the instant-quote markets. --hold keeps the draft until `hedge finalize`. For free text and PDFs use `hedge intake`",
+    )
+    .option("--hold", "defer the run: keep the draft until `hedge finalize <id>` releases it (attach documents and answer requirements first)")
     .option("--insured <name>", "insured business name (required unless --body supplies applicant.insured_name)")
     .option("--narrative <text>", "operations description of the risk (required unless --body supplies narrative)")
     .option("--lob <slugs>", "comma-separated lines of business, e.g. commercial_general_liability,workers_compensation")
@@ -144,6 +148,7 @@ export function registerSubmissions(program: Command): void {
       if (opts.payroll != null) body.wc_total_annual_payroll = intFlag(opts.payroll, "--payroll");
       if (opts.insuredId) body.insured_id = opts.insuredId;
       if (opts.producerEmail) body.producer_email = opts.producerEmail;
+      if (opts.hold) body.hold = true;
 
       const finalApplicant = body.applicant as Record<string, unknown> | undefined;
       if (!finalApplicant?.insured_name) throw new Error("--insured is required (or supply applicant.insured_name via --body)");
@@ -157,8 +162,12 @@ export function registerSubmissions(program: Command): void {
         headers: { "Idempotency-Key": opts.idempotencyKey ?? randomUUID() },
       });
       if (ctx.json) return printJson(res);
-      process.stdout.write(kv({ submission_id: res.submission_id, state: res.state, status: res.status_label }) + "\n");
-      process.stdout.write("\nNext: hedge upload " + res.submission_id + " <file.pdf>, hedge requirements " + res.submission_id + ", hedge finalize " + res.submission_id + "\n");
+      process.stdout.write(kv({
+        submission_id: res.submission_id, state: res.state, status: res.status_label,
+        marketing: res.marketing_status ?? "", next_step: res.next_step ?? "",
+      }) + "\n");
+      printWarnings(res.warnings);
+      process.stdout.write("\n" + nextAfterCreate(String(res.submission_id), res.marketing_status) + "\n");
     });
 
   program
@@ -196,9 +205,9 @@ export function registerSubmissions(program: Command): void {
         // marketing_status: matching runs for ~5 minutes after finalize.
         const hint = typeof r.marketing_hint === "string" && r.marketing_hint ? r.marketing_hint : null;
         if (r.marketing_status === "matching") {
-          process.stdout.write("\nNo markets yet - " + (hint ?? "Hedge is matching carrier markets now (usually ~5 minutes after finalize); re-run this in a few minutes.") + "\n");
+          process.stdout.write("\nNo markets yet - " + (hint ?? "Hedge is matching carrier markets now (usually ~5 minutes after create); check hedge markets " + submissionId + " in a few minutes.") + "\n");
         } else if (r.marketing_status === "not_started") {
-          process.stdout.write("\nNo markets yet - " + (hint ?? "run hedge finalize " + submissionId + " to start marketing.") + "\n");
+          process.stdout.write("\nNo markets yet - " + (hint ?? "this submission is held; run hedge finalize " + submissionId + " to release it.") + "\n");
         } else if (r.marketing_status === "no_markets_matched") {
           process.stdout.write("\nNo markets attached - " + (hint ?? "Hedge is reviewing options for this risk and will follow up.") + "\n");
         } else {
@@ -225,7 +234,7 @@ export function registerSubmissions(program: Command): void {
           carrier: m.carrier_name, line: l.lob_label ?? l.lob_slug, status: l.status_label ?? l.status, quote: l.quote_premium ?? "",
         }))), ["carrier", "line", "status", "quote"]) + "\n");
       } else {
-        process.stdout.write("\nNo markets attached yet. Matching usually completes within ~5 minutes of finalize - re-run this shortly (or check hedge requirements " + submissionId + ").\n");
+        process.stdout.write("\nNo markets attached yet. Matching usually completes within ~5 minutes of create - re-run this shortly (or check hedge markets " + submissionId + ").\n");
       }
       const byStatus = s.status_summary?.by_status;
       if (byStatus && Object.keys(byStatus).length) {
@@ -257,7 +266,7 @@ export function registerSubmissions(program: Command): void {
 
   program
     .command("finalize <submissionId>")
-    .description("Start marketing the submission to carriers")
+    .description("Release a held submission: start the run for a submission created with --hold (idempotent on one already running)")
     .option("--wait", "poll until markets attach (usually ~5 minutes), then print them")
     .option("--timeout <minutes>", "how long --wait polls before giving up", "8")
     .action(async (submissionId, opts) => {
@@ -271,7 +280,7 @@ export function registerSubmissions(program: Command): void {
         const wait = Number(r.typical_wait_seconds) > 0 ? Math.round(Number(r.typical_wait_seconds) / 60) : 5;
         process.stdout.write(
           `Marketing started. Markets usually attach within ~${wait} minutes.\n` +
-          `Track with: hedge status ${submissionId}  (or use finalize --wait next time)\n`,
+          `Track with: hedge markets ${submissionId}  (or use finalize --wait next time)\n`,
         );
         return;
       }
@@ -321,7 +330,7 @@ export function registerSubmissions(program: Command): void {
       if (req.forms?.length) {
         process.stdout.write("\nForms Hedge prepares: " + req.forms.join(", ") + "\n(download blanks with: hedge form <form_key>)\n");
       }
-      process.stdout.write("\nTrack sends and quotes with: hedge status " + submissionId + "\n");
+      process.stdout.write("\nThe three market categories, asks, assumptions and quotes: hedge markets " + submissionId + "\n");
     });
 
   program

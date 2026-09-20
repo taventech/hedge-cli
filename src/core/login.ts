@@ -1,4 +1,4 @@
-import { discover, deviceLogin, loopbackLogin, registerClient } from "./oauth.js";
+import { clientCredentialsLogin, discover, deviceLogin, loopbackLogin, registerClient } from "./oauth.js";
 import { openBrowser } from "./browser.js";
 import { saveToken, type CliConfig } from "./config.js";
 
@@ -54,4 +54,28 @@ export async function loginInteractive(opts: {
     token_endpoint: meta.token_endpoint,
     client_id: clientId,
   });
+}
+
+// Machine (client_credentials) sign-in for automation: exchange a brokerage
+// API key for a token and persist it with the secret so http.ts can renew the
+// token by re-exchange when it expires. Nothing here prints the secret.
+export async function loginClientCredentials(opts: {
+  cfg: CliConfig;
+  metadataUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scope?: string;
+}): Promise<{ scope?: string; expiresIn?: number }> {
+  const meta = await discover(opts.metadataUrl);
+  const tr = await clientCredentialsLogin(meta.token_endpoint, opts.clientId, opts.clientSecret, opts.scope);
+  saveToken(opts.cfg, {
+    access_token: tr.access_token,
+    expires_at: Math.floor(Date.now() / 1000) + (tr.expires_in ?? 3600),
+    scope: tr.scope,
+    token_endpoint: meta.token_endpoint,
+    client_id: opts.clientId,
+    grant: "client_credentials",
+    client_secret: opts.clientSecret,
+  });
+  return { scope: tr.scope, expiresIn: tr.expires_in };
 }

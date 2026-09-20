@@ -167,6 +167,34 @@ export async function loopbackLogin(opts: {
   });
 }
 
+/**
+ * Client Credentials grant (RFC 6749 §4.4) for a brokerage machine credential
+ * (client_id `bac_...` + client_secret `bas_...`, created under Settings → API
+ * keys in the broker portal). No refresh token is issued; renew by calling
+ * this again. Error messages never echo the secret.
+ */
+export async function clientCredentialsLogin(
+  tokenEndpoint: string,
+  clientId: string,
+  clientSecret: string,
+  scope?: string,
+): Promise<TokenResponse> {
+  const body = new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret });
+  if (scope) body.set("scope", scope);
+  const res = await fetch(tokenEndpoint, { method: "POST", headers: FORM, body });
+  let tb: TokenResponse & { error?: string; error_description?: string } = { access_token: "" };
+  try {
+    tb = (await res.json()) as typeof tb;
+  } catch {
+    /* non-JSON error body; fall through to the status-based message */
+  }
+  if (!res.ok || !tb.access_token) {
+    const why = tb.error_description || tb.error || `Token request failed (${res.status})`;
+    throw new Error(`Machine credential sign-in failed: ${why}`);
+  }
+  return tb;
+}
+
 /** Refresh an access token. */
 export async function refresh(tokenEndpoint: string, clientId: string, refreshToken: string): Promise<TokenResponse> {
   const res = await fetch(tokenEndpoint, {
