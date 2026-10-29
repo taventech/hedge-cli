@@ -1,7 +1,7 @@
 {
   "name": "hedge-broker",
-  "version": "0.4.0",
-  "description": "Command-line tool for Hedge. Send a risk (text and PDFs), read the markets Hedge is trying, follow the thread, and bind, from your terminal or a script.",
+  "version": "0.5.0",
+  "description": "Command-line tool for Hedge: check instant appetite, see what each market needs, create a file, answer, quote, download the quote PDFs and get the bind link, from your terminal or a script.",
   "type": "module",
   "bin": { "hedge": "dist/index.js" },
   "files": ["dist", "README.md", "CHANGELOG.md"],
@@ -15,7 +15,7 @@
   "homepage": "https://github.com/taventech/hedge-cli#readme",
   "repository": { "type": "git", "url": "git+https://github.com/taventech/hedge-cli.git" },
   "bugs": { "url": "https://github.com/taventech/hedge-cli/issues" },
-  "keywords": ["hedge", "insurance", "broker", "cli", "submissions", "commercial-insurance", "appetite"],
+  "keywords": ["hedge", "insurance", "broker", "cli", "instant-quote", "commercial-insurance", "appetite"],
   "publishConfig": { "access": "public" },
   "dependencies": {
     "commander": "^12.1.0"

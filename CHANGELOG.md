@@ -4,6 +4,41 @@ All notable changes to `hedge-broker` are documented here. This project follows
 [Semantic Versioning](https://semver.org) and
 [Keep a Changelog](https://keepachangelog.com).
 
+## [0.5.0] - Unreleased
+
+The instant-quote flow. Files created over the API reach Hedge Instant Quote
+markets only, and the commands follow the flow: appetite, requirements,
+create, answer, quote, quotes and PDFs, bind link. Risks no instant market
+writes are refused with where to email them (`email_us`).
+
+### Added
+
+- `appetite [description] --state --lines [--naics]`: `POST /broker/appetite/instant`, the instant markets that fit, with the class Hedge would use per carrier; prints `email_us` when none fits.
+- `requirements --state --lines [--programs ids]`: `POST /broker/requirements`, the core fields plus each market's own questions, with the `--set` target for each. Without `--programs` it uses every market `appetite` returns.
+- `create` (alias `submit`): `POST /broker/submissions` with `--programs`, `--set` answers, `--client-reference`, `--quote` and `--file` for the full JSON body.
+- `status <id> [--wait]`: `GET /broker/submissions/{id}/instant-quotes`, each market's state, missing answers and Hedge's suggestions.
+- `answer <id> --set k=v [--file]`: `PATCH /broker/submissions/{id}/answers`. `key=value` answers a canonical key for every market; `<program_id>:<id>=value` one market's own question; numbers and true/false are typed; `key:=<json>` sends exact JSON.
+- `quote <id> [--programs] [--wait]`: `POST /broker/submissions/{id}/quote`, with the per-market outcome (exit 1 on a 409).
+- `quotes <id> [--download [dir]]`: the itemized `GET /broker/submissions/{id}/quotes`; `--download` saves every stored quote PDF (Hedge's quote PDF and the carrier's).
+- `bind-link <id> <quoteId> [--for broker|insured]`: `POST .../quotes/{quote_id}/bind-link`.
+- `events [--since]`: the brokerage-wide `GET /broker/events` feed, following `next_cursor` to the tail.
+- `--sandbox` (or `HEDGE_ENV=sandbox`): sandbox-api.hedgespecialty.com, with its own stored sign-in.
+- Every request sends `Hedge-Client: hedge-cli/0.5.0`.
+- Structured errors print what to do: `email_us` for `no_instant_market`, missing fields, refused answers, assumptions to confirm; a 403 says not to retry, a 429 prints `Retry-After`. With `--json`, errors print their JSON body and exit 1.
+- `login` and `whoami` say when a token is read-only (submit access is turned on per brokerage by Hedge).
+
+### Changed
+
+- `intake` returns the per-market file state like `create`, and takes `--programs`, `--client-reference` and `--quote`; `--lob` is `--lines`; `--hold` is gone (an instant file never starts marketing).
+- `quotes` and `answer` now work on the file (they used to work one carrier session).
+- `requirements`, `appetite` and `status` are the flow's reads (see Added).
+- `submit` is `create`: `--lob` is `--lines`, `--body` is `--file`; `--hold`, `--tiv`, `--vehicles`, `--payroll` and `--insured-id` are gone (send them in `--file` or answer them with `--set`).
+
+### Removed
+
+- `markets`, `finalize`, `answer-asks`, `thread`, `reply`, `bind`, `bind-status`, `bind-upload`, `bind-submit`, `programs`, `program-schema`, `market-requirements`, `request-quote`. Each still parses and prints the command that replaced it.
+- `--staging` is hidden; use `--sandbox`.
+
 ## [0.4.0] - 2026-09-19
 
 The Hedge broker API rework: creating a submission now starts the run, markets
