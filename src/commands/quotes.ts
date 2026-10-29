@@ -28,10 +28,19 @@ function collectDocs(res: any): { docs: Doc[]; links: string[] } {
   const docs: Doc[] = [];
   const links: string[] = [];
   const seen = new Set<string>();
+  const names = new Set<string>();
   const add = (prefix: string, d: any) => {
     if (d.download_path && !seen.has(d.download_path)) {
       seen.add(d.download_path);
-      docs.push({ path: d.download_path, name: docFileName(prefix, d) });
+      // Two documents can share a name (same file_name or kind): number the
+      // later ones so none overwrites another.
+      const first = docFileName(prefix, d);
+      const ext = extname(first);
+      const stem = first.slice(0, first.length - ext.length);
+      let name = first;
+      for (let n = 2; names.has(name); n++) name = `${stem}-${n}${ext}`;
+      names.add(name);
+      docs.push({ path: d.download_path, name });
     } else if (!d.download_path && d.carrier_url) {
       links.push(`${prefix}: ${d.carrier_url}`);
     }
