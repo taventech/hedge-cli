@@ -66,7 +66,7 @@ export interface ClientOptions {
   // A static credential (Bindly org API key) sent as a header instead of OAuth.
   apiKey?: string;
   apiKeyHeader?: string; // default "X-Api-Key"
-  // Sent on every request (e.g. Hedge-Client: hedge-cli/0.5.0).
+  // Sent on every request (e.g. Hedge-Client: hedge-cli/0.5.1).
   headers?: Record<string, string>;
 }
 

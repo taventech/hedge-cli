@@ -6,10 +6,16 @@ All notable changes to `hedge-broker` are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-30
+
 ### Added
 
 - `answer <id> --confirm-suggestions`: sends `confirm_suggestions: true` on `PATCH /broker/submissions/{id}/answers`, confirming every value Hedge suggests (a class, for example) as it stands; alone or with `--set` answers. `status` and the other flow commands print it as the next step when Hedge has suggestions.
 - `npm test`: the `answer` request body checked against a local mock API.
+
+### Changed
+
+- Releases publish to npm with npm Trusted Publishing (GitHub OIDC); no stored npm token.
 
 ## [0.5.0] - 2026-10-30
 

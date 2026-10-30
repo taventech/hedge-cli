@@ -1,6 +1,6 @@
 {
   "name": "hedge-broker",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Command-line tool for Hedge: check instant appetite, see what each market needs, create a file, answer, quote, download the quote PDFs and get the bind link, from your terminal or a script.",
   "type": "module",
   "bin": { "hedge": "dist/index.js" },
