@@ -155,7 +155,7 @@ export function renderFileState(fs: any): string {
   }
 
   if (fs.suggested?.length) {
-    out.push("", "Hedge suggests (confirm with the same value, or answer another):");
+    out.push("", "Hedge suggests (confirm them all with --confirm-suggestions, or answer one with another value):");
     for (const s of fs.suggested) {
       const value = typeof s.value === "string" ? s.value : JSON.stringify(s.value);
       const target = s.program_id && s.id ? `${s.program_id}:${s.id}` : s.key;
@@ -168,7 +168,8 @@ export function renderFileState(fs: any): string {
 
   const next: string[] = [];
   if (markets.some((m) => m.state === "preparing" || m.state === "quoting")) next.push(`hedge status ${id} --wait`);
-  if (gaps.length || fs.suggested?.length) next.push(`hedge answer ${id} --set key=value ...`);
+  if (fs.suggested?.length) next.push(`hedge answer ${id} --confirm-suggestions`);
+  if (gaps.length) next.push(`hedge answer ${id} --set key=value ...`);
   if (gaps.some((m) => m.missing.some((item: any) => !setTarget(m.program_id, item)))) next.push(`hedge business ${id} ...  (core facts: name, address, contact, class, effective date)`);
   if (!fs.automatic_quoting && markets.some((m) => m.state === "ready")) next.push(`hedge quote ${id}`);
   if (markets.some((m) => m.state === "quoted")) next.push(`hedge quotes ${id} --download`, `hedge bind-link ${id} <quote_id>`);

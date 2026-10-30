@@ -22,6 +22,8 @@ jobs:
         run: npx tsc --noEmit
       - name: Build
         run: npm run build
+      - name: Test
+        run: npm test
       # Pack the CLI and run it from a clean install to prove the published
       # artifact is self-contained (commander is the only runtime dependency).
       - name: Verify packaged CLI

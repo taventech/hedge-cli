@@ -52,9 +52,10 @@ hedge create --insured "Green Thumb Landscaping LLC" \
   --set annual_revenue=850000 --set employee_count=6 \
   --client-reference AI-9f3c2b
 
-# 4. Follow each market and answer what it still needs
+# 4. Follow each market, confirm the classes Hedge suggests, answer what is still missing
 hedge status <submission-id> --wait
-hedge answer <submission-id> --set <program-id>:business_description=<value>
+hedge answer <submission-id> --confirm-suggestions
+hedge answer <submission-id> --set <key>=<value>
 
 # 5. Quote, read the quotes, save the PDFs, get the bind link
 hedge quote <submission-id> --wait
@@ -62,7 +63,7 @@ hedge quotes <submission-id> --download ./quotes
 hedge bind-link <submission-id> <quote-id>
 ```
 
-Each market on a file has one state: `preparing` (Hedge is building its application; poll), `needs_answers` (answer the listed questions), `ready`, `quoting`, `quoted`, `declined` or `not_a_fit`. `hedge status`, `create`, `intake`, `answer` and `quote` all print that state per market, the questions still missing, the values Hedge suggests (a class, for example) for you to confirm, and the next command to run.
+Each market on a file has one state: `preparing` (Hedge is building its application; poll), `needs_answers` (answer the listed questions), `ready`, `quoting`, `quoted`, `declined` or `not_a_fit`. `hedge status`, `create`, `intake`, `answer` and `quote` all print that state per market, the questions still missing, the values Hedge suggests (a class, for example) for you to confirm, and the next command to run. `hedge answer <id> --confirm-suggestions` confirms every suggestion as it stands (the portal's "Confirm all and continue"); to pick another value, answer that question with `--set` instead.
 
 Pass `--quote` on `create` or `intake` to have every market quote as soon as it is ready.
 
@@ -110,7 +111,7 @@ Email it to Hedge instead:
 | `hedge create [flags] [--set k=v ...] [--programs ids] [--client-reference ref] [--quote] [--file body.json\|-]` | Create a file for the instant markets (alias `submit`). Needs the insured, narrative, lines and state. |
 | `hedge intake [files...] [--text t\|--text-file path\|-] [--insured] [--lines] [--state] [--effective] [--programs] [--client-reference] [--quote]` | Create a file from documents and/or text (up to 20 files, 15 MB each, 60 MB total). Hedge reads them and prefills the applications. |
 | `hedge status <id> [--wait] [--timeout min]` | Each market's state and what it still needs. `--wait` polls every 5 seconds until no market is preparing or quoting. |
-| `hedge answer <id> --set k=v ... [--file answers.json]` | Answer what the markets need. |
+| `hedge answer <id> [--set k=v ...] [--confirm-suggestions] [--file answers.json]` | Answer what the markets need. `--confirm-suggestions` confirms every value Hedge suggests (`confirm_suggestions: true`), alone or with answers. |
 | `hedge business <id> [--insured] [--address --city --state --zip] [--contact-name] [--contact-email] [--contact-phone] [--effective] [--naics [--description]]` | Correct the file's core facts when `hedge status` says a core field is missing (the insured's contact, for example). The markets re-prepare. |
 | `hedge quote <id> [--programs ids] [--wait]` | Request quotes from the ready markets. A market that still needs answers says what (exit code 1 when none could be requested). |
 | `hedge quotes <id> [--download [dir]]` | The itemized quotes: premium, total, whether each can be bound, its documents. `--download` saves every PDF: Hedge's quote PDF and the carrier's, including carrier-hosted PDFs. Other carrier-hosted pages (an online proposal) are listed. |
