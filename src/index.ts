@@ -1,45 +1,50 @@
 #!/usr/bin/env node
-import { Command } from "commander";
-import { ApiError } from "./core/index.js";
+import { Command, Option } from "commander";
+import { ApiError, printJson } from "./core/index.js";
+import { VERSION } from "./version.js";
+import { describeError } from "./render.js";
 import { registerAuth } from "./commands/auth.js";
-import { registerSubmissions } from "./commands/submissions.js";
-import { registerIntake } from "./commands/intake.js";
-import { registerThread } from "./commands/thread.js";
-import { registerBind } from "./commands/bind.js";
-import { registerPrograms } from "./commands/programs.js";
-import { registerAppetite } from "./commands/appetite.js";
+import { registerFlow } from "./commands/flow.js";
+import { registerFile } from "./commands/file.js";
 import { registerQuotes } from "./commands/quotes.js";
+import { registerEvents } from "./commands/events.js";
+import { registerBook } from "./commands/book.js";
+import { registerRemoved } from "./commands/removed.js";
 
 const program = new Command();
 program
   .name("hedge")
-  .description("Send Hedge a risk from your terminal and track it to bind: intake, markets, thread, bind.")
-  .version("0.4.0")
-  .option("--staging", "use the staging environment")
-  .option("--json", "output raw JSON (for scripting)");
+  .description(
+    "Quote Hedge Instant Quote markets from your terminal: appetite, requirements, create, answer, quote, quotes and PDFs, bind link. Risks no instant market writes go to Hedge by email",
+  )
+  .version(VERSION)
+  .option("--sandbox", "use the sandbox (sandbox-api.hedgespecialty.com): carrier test systems, nothing is bound")
+  .addOption(new Option("--staging", "use Hedge's staging hostname").hideHelp())
+  .option("--json", "print the raw JSON response (errors too, with exit code 1)");
 
 registerAuth(program);
-registerIntake(program);
-registerSubmissions(program);
-registerThread(program);
-registerBind(program);
-registerPrograms(program);
-registerAppetite(program);
+registerFlow(program);
+registerFile(program);
 registerQuotes(program);
-
-program.hook("preAction", () => {
-  // global flags are read per-command via program.opts()
-});
+registerEvents(program);
+registerBook(program);
+registerRemoved(program);
 
 async function main() {
   try {
     await program.parseAsync(process.argv);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      process.stderr.write(`\n${err.message}\n`);
-      process.exit(1);
+    if (program.opts().json && err instanceof ApiError) {
+      const body = err.body && typeof err.body === "object" ? err.body : { detail: err.message };
+      printJson({ status: err.status, ...(err.retryAfter != null ? { retry_after: err.retryAfter } : {}), ...body });
+    } else if (err instanceof ApiError) {
+      process.stderr.write(`\n${err.status === 401 ? err.message : describeError(err)}\n`);
+    } else {
+      // fetch() hides the reason (DNS, refused, TLS) in err.cause.
+      const cause = (err as { cause?: { code?: string; hostname?: string } })?.cause;
+      const why = cause?.code ? ` (${cause.code}${cause.hostname ? " " + cause.hostname : ""})` : "";
+      process.stderr.write(`\nError: ${err instanceof Error ? err.message : String(err)}${why}\n`);
     }
-    process.stderr.write(`\nError: ${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(1);
   }
 }

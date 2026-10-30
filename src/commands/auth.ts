@@ -1,21 +1,31 @@
 import type { Command } from "commander";
-import { loginInteractive, loginClientCredentials, clearToken, apiRequest, kv, printJson } from "../core/index.js";
+import { loginInteractive, loginClientCredentials, clearToken, loadToken, apiRequest, kv, printJson } from "../core/index.js";
 import { makeCtx } from "../context.js";
 
 const SCOPE = "broker_mcp broker_submit";
 
+// Hedge grants broker_submit only when it has turned submit on for the
+// brokerage; reads are self-serve. Say which one this sign-in got.
+function accessNote(scope: string | undefined): string {
+  if (scope && !scope.split(/\s+/).includes("broker_submit")) {
+    return "Read-only: submit access is off for your brokerage. Hedge turns it on; request it in the portal under Settings → API keys.\n";
+  }
+  return "";
+}
+
 export function registerAuth(program: Command): void {
   program
     .command("login")
-    .description("Sign in to your Hedge broker account (device code by default; --client-id for a machine credential)")
+    .summary("Sign in (device code, browser, or an API key)")
+    .description("Sign in to your Hedge broker account (device code by default; --client-id for an API key). Add --sandbox to sign in to the sandbox")
     .option("--browser", "use the browser (loopback) flow instead of a device code")
     .option(
       "--client-id <id>",
-      "sign in with a brokerage machine credential (client_credentials grant) for scripts and automation; the client id (bac_...) from Settings → API keys. Pair with --client-secret",
+      "sign in with an API key (client_credentials grant) for scripts and agents: the client id (bac_...) from Settings → API keys. Pair with --client-secret",
     )
     .option(
       "--client-secret <secret>",
-      "the machine credential's secret (bas_...). Prefer HEDGE_CLIENT_SECRET in the environment so the secret stays out of shell history",
+      "the API key's secret (bas_...). Prefer HEDGE_CLIENT_SECRET in the environment so the secret stays out of shell history",
     )
     .action(async (opts) => {
       const g = program.opts();
@@ -36,9 +46,10 @@ export function registerAuth(program: Command): void {
         // Never echo the secret. The token file is written 0600 and the
         // access token is renewed by re-exchange when it expires.
         process.stdout.write(
-          `Signed in with machine credential ${clientId}` +
+          `Signed in to ${ctx.env.name} with API key ${clientId}` +
             (r.scope ? ` (scope: ${r.scope})` : "") +
-            ".\nWrites made with this credential must name the producing broker: pass --producer-email on submit, intake, reply, answer-asks, withdraw and bind.\n",
+            ".\nWrites made with an API key name the producing broker: pass --producer-email on create, intake, business, answer, quote, bind-link and withdraw.\n" +
+            accessNote(r.scope),
         );
         return;
       }
@@ -50,7 +61,7 @@ export function registerAuth(program: Command): void {
         mode: opts.browser ? "browser" : "device",
         log: (m) => process.stdout.write(m + "\n"),
       });
-      process.stdout.write("\nSigned in.\n");
+      process.stdout.write(`\nSigned in to ${ctx.env.name}.\n` + accessNote(loadToken(ctx.cfg)?.scope));
     });
 
   program
@@ -70,13 +81,13 @@ export function registerAuth(program: Command): void {
       const me = await apiRequest<Record<string, unknown>>(ctx.client, "GET", "/broker/me");
       if (ctx.json) return printJson(me);
       const b = (me.brokerage ?? {}) as Record<string, unknown>;
-      process.stdout.write(
-        kv({
-          email: me.email,
-          name: me.full_name,
-          brokerage: b.name,
-          role: me.role,
-        }) + "\n",
+      const scope = loadToken(ctx.cfg)?.scope ?? "";
+      // An API key has no user: show only the fields the server returned.
+      const rows = Object.fromEntries(
+        Object.entries({ environment: ctx.env.name, email: me.email, name: me.full_name, brokerage: b.name, role: me.role, scope }).filter(
+          ([, v]) => v != null && v !== "",
+        ),
       );
+      process.stdout.write(kv(rows) + "\n" + accessNote(scope));
     });
 }

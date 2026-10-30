@@ -1,6 +1,8 @@
 # hedge
 
-Send Hedge a risk from your terminal, the way you would email it, and track it to bind. `hedge intake` takes free text and PDFs; Hedge extracts the risk, matches appetite, emails the producer the clearance and opens the market lanes. `hedge markets` shows the three market categories with what each lane still needs from you, the assumptions Hedge made and the released quotes. `hedge thread` is the conversation with Hedge; `hedge reply` answers it. `hedge bind` requests a bind with explicit attestation of the assumptions.
+Quote Hedge Instant Quote markets from your terminal or a script. `hedge appetite` says which instant markets will quote a risk, `hedge requirements` lists everything each one needs, `hedge create` opens the file, `hedge answer` fills the gaps, `hedge quote` requests the quotes, `hedge quotes --download` saves every quote PDF and `hedge bind-link` returns the link to bind.
+
+**Instant markets only.** Files created over the API and the CLI reach Hedge Instant Quote markets only. When no instant market fits a risk, the CLI says so and prints where to email it and what to include (`email_us`); Hedge's other markets are reached by email.
 
 ## Install
 
@@ -15,7 +17,7 @@ npm install -g hedge-broker   # provides `hedge`
 Or run without installing:
 
 ```bash
-npx hedge-broker appetite "roofing contractor" --state CA
+npx hedge-broker appetite "residential landscaping" --state CA --lines gl
 ```
 
 ### Homebrew (self-contained binary, no Node required)
@@ -35,127 +37,123 @@ The installer downloads the binary for your OS and CPU into `$HOME/.local/bin`. 
 ## Quickstart
 
 ```bash
-hedge login                                            # device-code sign in (prints a code + URL)
-hedge intake ./acord-125.pdf ./loss-runs.pdf \
-  --text "Peak Roofing LLC, residential re-roofing in CA, 12 employees, GL and property, eff 10/1"
-hedge markets <submission-id> --wait                   # the three categories, asks, assumptions, quotes
-hedge thread <submission-id>                           # the clearance email, questions, quote deliveries
-hedge reply <submission-id> "Payroll is 900k, no work over 3 stories"
-hedge bind <submission-id> --quote <quote-id>          # 409 lists the assumptions to attest
-hedge bind <submission-id> --quote <quote-id> --attest # after the agent reviewed each one
+hedge login                                    # device-code sign in (prints a code + URL)
+
+# 1. Which instant markets fit
+hedge appetite "Residential landscaping and lawn care, 6 employees" --state CA --lines gl --naics 561730
+
+# 2. What they need: the core fields, then each market's own questions
+hedge requirements --state CA --lines gl
+
+# 3. Create the file, answering what you already know
+hedge create --insured "Green Thumb Landscaping LLC" \
+  --narrative "Residential landscaping and lawn care, 6 employees, no tree work over 15 ft" \
+  --lines gl --state CA --naics 561730 --effective 2026-11-15 \
+  --set annual_revenue=850000 --set employee_count=6 \
+  --client-reference AI-9f3c2b
+
+# 4. Follow each market and answer what it still needs
+hedge status <submission-id> --wait
+hedge answer <submission-id> --set <program-id>:business_description=<value>
+
+# 5. Quote, read the quotes, save the PDFs, get the bind link
+hedge quote <submission-id> --wait
+hedge quotes <submission-id> --download ./quotes
+hedge bind-link <submission-id> <quote-id>
 ```
 
-Creating a submission starts the run. There is no separate "go shop it" step: `hedge intake` and `hedge submit` both start marketing as soon as the create commits, exactly like emailing Hedge the risk. Pass `--hold` to keep the draft (attach documents, answer requirements), then `hedge finalize <id>` releases it.
+Each market on a file has one state: `preparing` (Hedge is building its application; poll), `needs_answers` (answer the listed questions), `ready`, `quoting`, `quoted`, `declined` or `not_a_fit`. `hedge status`, `create`, `intake`, `answer` and `quote` all print that state per market, the questions still missing, the values Hedge suggests (a class, for example) for you to confirm, and the next command to run.
 
-## The three market categories
+Pass `--quote` on `create` or `intake` to have every market quote as soon as it is ready.
 
-`hedge markets` always returns all three, in this order:
+## Answers: `--set`
 
-| Category | Label | What it is |
+`hedge create` and `hedge answer` take answers with `--set`, repeatable:
+
+| Form | Sends | Use it for |
 | --- | --- | --- |
-| `instant_quote` | Hedge Instant Quote | Connected carrier APIs, quoted on recorded favorable assumptions. Each assumption is a pre-bind attestation the producer must confirm. |
-| `binding` | Hedge Binding | Markets Hedge quotes for you. |
-| `specialty` | Hedge Specialty | Email markets that need the completed ACORDs, program requirements and loss runs. |
+| `--set annual_revenue=850000` | `shared_answers.annual_revenue = 850000` | A canonical key: answered once, it fills every market that asks it. |
+| `--set <program_id>:gl_each_occurrence_limit=1000000` | `answers[program_id].gl_each_occurrence_limit` | A question only that market asks (keys `program.<slug>.<id>` in `hedge requirements`). |
+| `--set website:='"12345"'` | exact JSON | Anything that must not be typed for you. |
 
-Each lane carries its status, `submit_ready`, `needs_from_you` (only while the lane is gapped), `assumptions` (`[ ]` still standing, `[x]` confirmed) and released firm `quotes` with their `quote_id`.
+With `=`, plain numbers and `true`/`false` are sent typed; everything else (and a digit string with a leading zero, like a ZIP) is text. With `:=` the value is parsed as JSON. `hedge requirements` prints the exact `--set` target for every question. Answers are all or nothing: if one is refused, none is saved and the CLI lists why.
+
+For full control, send the request body as JSON with `--file payload.json` (or `--file -` for stdin); flags win over the body's fields. The body is the API's: `applicant`, `narrative`, `lines_of_business`, `primary_state`, `effective_date`, `program_ids`, `shared_answers`, `answers`, `client_reference`, `quote`, `producer_email`.
+
+## When no instant market fits
+
+```text
+$ hedge appetite --state NV --lines gl
+No Hedge Instant Quote market fits this risk; it can't be filed over the API.
+
+Email it to Hedge instead:
+  to:       submissions@hedgespecialty.com
+  subject:  New submission: ...
+  include:
+    - ACORD 125 (Commercial Insurance Application)
+    - ACORD 126 (General Liability)
+    ...
+```
+
+`hedge create` and `hedge intake` answer the same way (`422 no_instant_market`) and create nothing.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `hedge intake [files...] [--text <text>\|--text-file <path\|->] [--insured <name>] [--lob <slugs>] [--state <ST>] [--effective <date>] [--producer-email <email>] [--hold]` | Send Hedge a risk as text and/or PDFs (up to 20, 15 MB each). Creates the submission and starts the run. Requires `--text`/`--text-file` or `--insured`. |
-| `hedge submit --insured <name> --narrative <text> [flags] [--hold]` | Create a submission from structured fields and start the run. `--body <file\|->` sends a full JSON body, with explicit flags taking precedence; see `hedge submit --help`. |
-| `hedge markets <submissionId> [--wait] [--timeout min]` | The markets being tried in the three categories, with status, `needs_from_you`, assumptions and quotes. `--wait` polls until a lane attaches (usually ~5 minutes after create). |
-| `hedge thread <submissionId> [--since cursor] [--limit n] [--one-page]` | The conversation with Hedge, oldest first. Follows `next_cursor` to the tail; `--json` returns `{messages, next_cursor, last_cursor}`. |
-| `hedge reply <submissionId> <text\|-> [--attach ids] [--producer-email]` | Reply to Hedge exactly as you would reply to its email: answer a question, send a revision, authorize a bind. Hedge answers on the thread within a couple of minutes. |
-| `hedge answer-asks <submissionId> [--set k=v ...] [--producer-email]` | Answer the outstanding items the matched markets still need, in one batch. Without `--set` it lists the items and their keys; values are typed per the item's input. |
-| `hedge withdraw <submissionId> [--producer-email]` | Withdraw: a held draft is deleted, a live placement is pulled from every engaged market. |
-| `hedge bind <submissionId> --quote <quoteId> [--payment in_full\|monthly] [--attest \| --attest-keys k1,k2] [--producer-email]` | Request to bind a released quote. While assumptions stand unconfirmed the API answers 409 `assumptions_unconfirmed`; the CLI prints them and the exact re-run with `--attest`. |
-| `hedge bind-status <submissionId> [bindRequestId]` | Bind requests on a submission, or one in full: status, unconfirmed assumptions, contingencies with upload paths, next steps. |
-| `hedge bind-upload <submissionId> <bindRequestId> <contingencyId> <file.pdf> [--notes]` | Attach a PDF to a pre-bind contingency while the request is drafted. |
-| `hedge bind-submit <submissionId> <bindRequestId> [--attest \| --attest-keys]` | Submit the drafted bind request to Hedge for placement. Same 409 handling as `bind`. |
-| `hedge programs [--category c] [--lob slug] [--state ST]` | The carrier programs your brokerage can quote, one row per program with its category. |
-| `hedge program-schema <programId> [--lob slug] [--state ST]` | The application question schema for an instant-quote program, for your own application builder. |
-| `hedge upload <submissionId> <file.pdf> [--name label]` | Attach an ACORD, loss runs, or supplement. Documents uploaded after create flow into the open lanes. |
-| `hedge requirements <submissionId>` | The gaps view: what the submission still needs (per market, forms, carrier questions). |
-| `hedge finalize <submissionId> [--wait]` | Release a held submission (one created with `--hold`). Idempotent on a submission whose run already started. |
-| `hedge status <submissionId>` | Submission detail plus the live per-carrier marketing table, status roll-up, and documents on file. |
-| `hedge submissions [--status state] [--search q] [--limit n] [--offset n] [--updated-since iso]` | List your brokerage's submissions, with filters and paging. |
-| `hedge appetite <class> [--state ST] [--lob slug]` | Which markets have appetite for a class of business. |
-| `hedge market-requirements <marketId> --lob <slug> [--state ST] [--programs keys]` | What a market needs to quote a line. Market ids come from `hedge appetite --json`. |
-| `hedge forms [search]` / `hedge form <formKey> [-o file]` | Search the blank application-form catalog and download a blank. |
-| `hedge documents <submissionId>` / `hedge download <documentId> [-o file]` | List a submission's finalized documents and download one. |
-| `hedge quotes <submissionId>` / `hedge answer <submissionId> <sessionId> --set k=v` / `hedge request-quote <submissionId> <sessionId>` | Work an instant-quote carrier session directly. |
-| `hedge policies` / `hedge policy <policyId>` / `hedge policy-doc <policyId> <kind> [-o file]` | Bound policies, one policy's detail, and its `binder`, `policy` or `declarations` PDF. |
-| `hedge payments` | Payment and invoice status, with invoice links. |
-| `hedge whoami` | Show the signed-in broker and brokerage. |
-| `hedge login [--browser] [--client-id <id> --client-secret <secret>]` / `hedge logout` | Sign in (device code, browser, or a machine credential) and out. |
+| `hedge appetite [description] --state ST --lines l1,l2 [--naics code]` | Which Hedge Instant Quote markets will quote the risk, with the class Hedge would use per carrier. Prints `email_us` when none fits. |
+| `hedge requirements --state ST --lines l1,l2 [--programs id,id]` | The core fields of a file and each instant market's own questions, per market, with the `--set` target for each. Without `--programs` it uses every market `hedge appetite` returns. |
+| `hedge create [flags] [--set k=v ...] [--programs ids] [--client-reference ref] [--quote] [--file body.json\|-]` | Create a file for the instant markets (alias `submit`). Needs the insured, narrative, lines and state. |
+| `hedge intake [files...] [--text t\|--text-file path\|-] [--insured] [--lines] [--state] [--effective] [--programs] [--client-reference] [--quote]` | Create a file from documents and/or text (up to 20 files, 15 MB each, 60 MB total). Hedge reads them and prefills the applications. |
+| `hedge status <id> [--wait] [--timeout min]` | Each market's state and what it still needs. `--wait` polls every 5 seconds until no market is preparing or quoting. |
+| `hedge answer <id> --set k=v ... [--file answers.json]` | Answer what the markets need. |
+| `hedge business <id> [--insured] [--address --city --state --zip] [--contact-name] [--contact-email] [--contact-phone] [--effective] [--naics [--description]]` | Correct the file's core facts when `hedge status` says a core field is missing (the insured's contact, for example). The markets re-prepare. |
+| `hedge quote <id> [--programs ids] [--wait]` | Request quotes from the ready markets. A market that still needs answers says what (exit code 1 when none could be requested). |
+| `hedge quotes <id> [--download [dir]]` | The itemized quotes: premium, total, whether each can be bound, its documents. `--download` saves every PDF: Hedge's quote PDF and the carrier's, including carrier-hosted PDFs. Other carrier-hosted pages (an online proposal) are listed. |
+| `hedge bind-link <id> <quoteId> [--for broker\|insured] [--insured-email e] [--attest]` | The link to bind: the broker's bind checklist in the Hedge portal, or the insured's pay-and-bind page where the market takes the insured's payment. |
+| `hedge events [--since cursor] [--limit n] [--one-page]` | What changed across all your brokerage's files, oldest first. Prints the cursor to resume from. |
+| `hedge submissions [--status s] [--search q] [--limit n] [--offset n] [--updated-since iso]` | List your brokerage's files. |
+| `hedge upload <id> <file.pdf> [--name label]` | Attach an ACORD, loss runs or a supplement to a file. |
+| `hedge withdraw <id>` | Withdraw a file. |
+| `hedge documents <id>` / `hedge download <documentId> [-o file]` | List a file's finalized documents and download one. |
+| `hedge forms [search]` / `hedge form <formKey> [-o file]` | Search the blank application forms (the ACORDs `email_us` asks for) and download one. |
+| `hedge policies` / `hedge policy <id>` / `hedge policy-doc <id> <kind>` / `hedge payments` | Your bound policies, their documents, and payments. |
+| `hedge login` / `hedge logout` / `hedge whoami` | Sign in and out; `whoami` shows the environment, the brokerage and whether the token can submit. |
 
-Add `--json` to any command for the raw API response, so the CLI composes in scripts:
+Global flags:
+
+- `--json`: print the raw API response, so the CLI composes in scripts. Errors print their JSON body too (with `status`), and the exit code is 1.
+- `--sandbox` (or `HEDGE_ENV=sandbox`): use the sandbox at `sandbox-api.hedgespecialty.com`, Hedge's test environment with carrier test systems. Sandbox and production keep separate sign-ins; a sandbox key never works on production.
 
 ```bash
-hedge markets <submission-id> --json | jq '.categories[] | select(.category=="instant_quote") | .lanes[] | {market_name, status, quotes}'
+hedge status <submission-id> --json | jq '.markets[] | {market, state, missing: [.missing[].key]}'
 ```
 
-Add `--staging` to any command (or set `HEDGE_ENV=staging`) to target the staging environment.
+## Errors: stop and back off
 
-## Example: a submission end to end
+- **403**: the call is not allowed (for example, submit access is off for your brokerage). It will not change on retry: stop and have a person check access.
+- **429**: rate limited. The CLI prints the `Retry-After` seconds; wait that long before the next call.
+- **422 / 409**: the CLI prints what to fix (`no_instant_market` with `email_us`, `missing_core` fields, refused answers, a market that is not ready).
 
-```bash
-hedge login
-hedge intake ./acord-125.pdf --text "Peak Roofing LLC, residential re-roofing, no hot tar, no work over 3 stories. 12 employees, payroll 900k, 3 vehicles. GL + property, effective 2026-10-01, Oakland CA." --producer-email dana@youragency.com
-hedge markets <submission-id> --wait
-#   Hedge Instant Quote: lanes quoted on assumptions ([ ] = still to confirm)
-#   Hedge Binding:       markets Hedge quotes for you, with needs_from_you
-#   Hedge Specialty:     email markets waiting on completed ACORDs / loss runs
-hedge answer-asks <submission-id>                              # list the outstanding asks and their keys
-hedge answer-asks <submission-id> --set years_in_business=8 --set prior_losses=false
-hedge upload <submission-id> ./supplemental.pdf --name "Roofing supplement"
-hedge thread <submission-id>                                   # the clearance email and Hedge's questions
-hedge reply <submission-id> "No hot-tar work; the 3-story limit is firm."
-hedge bind <submission-id> --quote <quote-id> --payment in_full
-#   409: assumptions unconfirmed -> lists each one and the re-run
-hedge bind <submission-id> --quote <quote-id> --payment in_full --attest
-hedge bind-upload <submission-id> <bind-request-id> <contingency-id> ./signed-app.pdf
-hedge bind-submit <submission-id> <bind-request-id>
-hedge bind-status <submission-id> <bind-request-id>
-hedge policies
-```
-
-Structured creates still work. `hedge submit` takes the full applicant, contact, address and exposure flags (see `hedge submit --help`), or a JSON body:
-
-```bash
-hedge submit --body ./submission.json
-cat submission.json | hedge submit --body - --effective 2026-09-01 --hold
-hedge finalize <submission-id> --wait     # release the held draft
-```
-
-Every `intake`, `submit` and `reply` sends an `Idempotency-Key` header (a random UUID each run). A scripted retry that must not double-create should pass its own key with `--idempotency-key <key>`.
-
-## Binding and attestation
-
-Instant quotes are obtained on recorded assumptions: values Hedge defaulted on the carrier application because the file did not state them. They print on the signable application, so the retail agent must confirm them before the order reaches the carrier. `hedge markets` lists them per lane; `hedge bind` (and `hedge bind-submit`) answer 409 `assumptions_unconfirmed` while any stand, keep the draft, and the CLI prints every statement plus the exact command to confirm:
-
-- `--attest` confirms every standing assumption on the quote's carrier application.
-- `--attest-keys k1,k2` confirms only those keys.
-
-Send either only after the agent has reviewed each statement; the confirmation is recorded on the bind request under the producing broker. Nothing is sent to a carrier until `hedge bind-submit`.
+The CLI never retries on its own.
 
 ## Signing in
-
-The CLI signs in with OAuth 2.1 and works over SSH. Three modes:
 
 | Mode | How | When to use |
 | --- | --- | --- |
 | Device code (default) | `hedge login` | Anywhere, including headless servers and SSH. Prints a short code and a URL to approve in any browser. |
-| Browser (loopback) | `hedge login --browser` | A local machine with a browser. Opens it and captures the redirect on `127.0.0.1`. |
-| Machine credential | `hedge login --client-id bac_... --client-secret bas_...` | Scripts and automation. Uses the `client_credentials` grant with an API key created under **Settings → API keys** in the broker portal. Prefer `HEDGE_CLIENT_SECRET` in the environment over the flag. The token is cached with its expiry and renewed by re-exchange; the secret is never printed. |
+| Browser (loopback) | `hedge login --browser` | A local machine with a browser. |
+| API key | `hedge login --client-id bac_... --client-secret bas_...` | Scripts and agents. Uses the `client_credentials` grant with a key from **Settings → API keys** in the broker portal. Prefer `HEDGE_CLIENT_SECRET` in the environment over the flag. The secret is never printed. |
 
-Machine credentials carry no broker identity, so writes made with one must name the producing broker: pass `--producer-email` on `intake`, `submit`, `reply`, `answer-asks`, `withdraw`, `bind`, `bind-upload` and `bind-submit`.
+Reading (appetite, requirements, your files, quotes, documents, events) is open to every brokerage. Creating, answering, quoting and bind links need submit access, which Hedge turns on per brokerage; request it in the portal under **Settings → API keys**. `hedge login` and `hedge whoami` say when a token is read-only.
 
-Credentials are stored per profile at `~/.config/taven-cli/hedge.<profile>.json` with `0600` permissions. Access tokens are refreshed automatically. Sign out with `hedge logout`.
+An API key carries no broker identity, so writes made with one name the producing broker: pass `--producer-email` on `create`, `intake`, `business`, `answer`, `quote`, `bind-link` and `withdraw`.
 
-The CLI requests the `broker_mcp` and `broker_submit` scopes. Read commands work with either scope; `intake`, `submit`, `upload`, `finalize`, `reply`, `answer-asks`, `withdraw`, `bind*`, `answer` and `request-quote` require `broker_submit`.
+Every request sends `Hedge-Client: hedge-cli/<version>`. Credentials are stored per environment at `~/.config/taven-cli/hedge.<environment>.json` with `0600` permissions.
+
+## Upgrading from 0.4
+
+0.5 follows the instant-quote flow. `hedge markets`, `finalize`, `answer-asks`, `thread`, `reply`, `bind`, `bind-status`, `bind-upload`, `bind-submit`, `programs`, `program-schema`, `market-requirements` and `request-quote` were removed; running one prints the command that replaced it. `hedge quotes` now reads the itemized quotes (it used to list carrier sessions), `hedge answer` answers the file (it used to answer one carrier session), `hedge requirements` and `hedge appetite` are the flow's reads, and `submit` is `create` with `--lines` (was `--lob`) and `--file` (was `--body`). `--staging` became `--sandbox`.
 
 ## License
 

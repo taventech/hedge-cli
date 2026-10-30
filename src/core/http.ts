@@ -6,7 +6,8 @@ import { clientCredentialsLogin, refresh } from "./oauth.js";
 // command can act on a structured error, e.g. the 409 `assumptions_unconfirmed`
 // a bind request answers with the list of assumptions to attest.
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public body?: unknown) {
+  // retryAfter: seconds from a 429/503 Retry-After header, when sent.
+  constructor(public status: number, message: string, public body?: unknown, public retryAfter?: number) {
     super(message);
   }
 }
@@ -32,8 +33,10 @@ function renderErrorDetail(detail: unknown, fallback: string): string {
 }
 
 // Shared non-2xx handling: pull detail/error off a parsed JSON body (or use
-// the raw text) and build the ApiError.
-function apiErrorFrom(status: number, parsed: unknown, fallback: string): ApiError {
+// the raw text) and build the ApiError. A structured detail
+// ({code, message, ...}) renders as its message; callers that need the
+// extras read err.body.
+function apiErrorFrom(status: number, parsed: unknown, fallback: string, headers?: Headers): ApiError {
   let detail: unknown = undefined;
   if (parsed && typeof parsed === "object") {
     const obj = parsed as { detail?: unknown; error?: unknown };
@@ -41,7 +44,20 @@ function apiErrorFrom(status: number, parsed: unknown, fallback: string): ApiErr
   } else if (typeof parsed === "string") {
     detail = parsed;
   }
-  return new ApiError(status, renderErrorDetail(detail, fallback), parsed);
+  if (detail && typeof detail === "object" && !Array.isArray(detail) && typeof (detail as { message?: unknown }).message === "string") {
+    detail = (detail as { message: string }).message;
+  }
+  const ra = Number.parseInt(headers?.get("retry-after") ?? "", 10);
+  return new ApiError(status, renderErrorDetail(detail, fallback), parsed, Number.isFinite(ra) ? ra : undefined);
+}
+
+function parseBody(text: string): unknown {
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text; // HTML error pages (502s from a proxy) are not JSON
+  }
 }
 
 export interface ClientOptions {
@@ -50,6 +66,24 @@ export interface ClientOptions {
   // A static credential (Bindly org API key) sent as a header instead of OAuth.
   apiKey?: string;
   apiKeyHeader?: string; // default "X-Api-Key"
+  // Sent on every request (e.g. Hedge-Client: hedge-cli/0.5.0).
+  headers?: Record<string, string>;
+}
+
+// Auth plus the client's standing headers, shared by every request kind.
+async function baseHeaders(opts: ClientOptions, extra?: Record<string, string>): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { ...(opts.headers ?? {}), ...(extra ?? {}) };
+  if (opts.apiKey) headers[opts.apiKeyHeader ?? "X-Api-Key"] = opts.apiKey;
+  else headers.Authorization = `Bearer ${await bearer(opts.cfg)}`;
+  return headers;
+}
+
+// Server-returned paths (download_path) carry the /api/v1 prefix; apiBase
+// already ends in it. Only same-API relative paths are ever followed.
+function apiUrl(opts: ClientOptions, path: string): string {
+  if (!path.startsWith("/") || path.startsWith("//")) throw new ApiError(400, `Not an API path: ${path}`);
+  const rel = path.startsWith("/api/v1/") ? path.slice("/api/v1".length) : path;
+  return opts.apiBase.replace(/\/$/, "") + rel;
 }
 
 // Returns a valid bearer, refreshing (and persisting) if within 60s of expiry.
@@ -99,30 +133,17 @@ export async function apiRequest<T = unknown>(
   path: string,
   init?: { body?: unknown; headers?: Record<string, string>; query?: Record<string, string | undefined> },
 ): Promise<T> {
-  const url = new URL(opts.apiBase.replace(/\/$/, "") + path);
+  const url = new URL(apiUrl(opts, path));
   for (const [k, v] of Object.entries(init?.query ?? {})) if (v != null) url.searchParams.set(k, v);
-  const headers: Record<string, string> = { Accept: "application/json", ...(init?.headers ?? {}) };
-  if (opts.apiKey) {
-    headers[opts.apiKeyHeader ?? "X-Api-Key"] = opts.apiKey;
-  } else {
-    headers.Authorization = `Bearer ${await bearer(opts.cfg)}`;
-  }
+  const headers = await baseHeaders(opts, { Accept: "application/json", ...(init?.headers ?? {}) });
   let body: string | undefined;
   if (init?.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(init.body);
   }
   const res = await fetch(url, { method, headers, body });
-  const text = await res.text();
-  let parsed: unknown = undefined;
-  if (text) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = text;
-    }
-  }
-  if (!res.ok) throw apiErrorFrom(res.status, parsed, `Request failed (${res.status})`);
+  const parsed = parseBody(await res.text());
+  if (!res.ok) throw apiErrorFrom(res.status, parsed, `Request failed (${res.status})`, res.headers);
   return parsed as T;
 }
 
@@ -135,28 +156,17 @@ export async function multipartRequest<T = unknown>(
   form: FormData,
   extraHeaders?: Record<string, string>,
 ): Promise<T> {
-  const url = opts.apiBase.replace(/\/$/, "") + path;
-  const headers: Record<string, string> = { Accept: "application/json", ...(extraHeaders ?? {}) };
-  if (opts.apiKey) headers[opts.apiKeyHeader ?? "X-Api-Key"] = opts.apiKey;
-  else headers.Authorization = `Bearer ${await bearer(opts.cfg)}`;
-  const res = await fetch(url, { method, headers, body: form });
-  const text = await res.text();
-  let parsed: unknown = undefined;
-  if (text) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = text; // HTML error pages (502s from a proxy) are not JSON
-    }
-  }
-  if (!res.ok) throw apiErrorFrom(res.status, parsed, `Upload failed (${res.status})`);
+  const headers = await baseHeaders(opts, { Accept: "application/json", ...(extraHeaders ?? {}) });
+  const res = await fetch(apiUrl(opts, path), { method, headers, body: form });
+  const parsed = parseBody(await res.text());
+  if (!res.ok) throw apiErrorFrom(res.status, parsed, `Upload failed (${res.status})`, res.headers);
   return parsed as T;
 }
 
 // Server-derived filenames are untrusted: keep only the final path segment
 // (either separator style) and strip control chars plus the characters
 // Windows forbids, so the name can never escape the target directory.
-function sanitizeFilename(name: string): string {
+export function sanitizeFilename(name: string): string {
   const last = name.replace(/\\/g, "/").split("/").pop() ?? "";
   const cleaned = last.replace(/[:*?"<>|\u0000-\u001f]/g, "_").trim();
   if (!cleaned || cleaned === "." || cleaned === "..") return "";
@@ -190,23 +200,9 @@ export async function downloadRequest(
   outPath?: string,
   fallbackName?: string,
 ): Promise<string> {
-  const url = opts.apiBase.replace(/\/$/, "") + path;
-  const headers: Record<string, string> = {};
-  if (opts.apiKey) headers[opts.apiKeyHeader ?? "X-Api-Key"] = opts.apiKey;
-  else headers.Authorization = `Bearer ${await bearer(opts.cfg)}`;
-  const res = await fetch(url, { method, headers });
-  if (!res.ok) {
-    const text = await res.text();
-    let parsed: unknown = undefined;
-    if (text) {
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = text;
-      }
-    }
-    throw apiErrorFrom(res.status, parsed, `Download failed (${res.status})`);
-  }
+  const headers = await baseHeaders(opts);
+  const res = await fetch(apiUrl(opts, path), { method, headers });
+  if (!res.ok) throw apiErrorFrom(res.status, parseBody(await res.text()), `Download failed (${res.status})`, res.headers);
   // Sanitized so a server-supplied filename can never escape the cwd.
   const serverName = dispositionFilename(res.headers.get("content-disposition"));
   const safeName = serverName ? sanitizeFilename(serverName) : "";
