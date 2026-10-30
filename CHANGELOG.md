@@ -4,6 +4,13 @@ All notable changes to `hedge-broker` are documented here. This project follows
 [Semantic Versioning](https://semver.org) and
 [Keep a Changelog](https://keepachangelog.com).
 
+## [Unreleased]
+
+### Added
+
+- `answer <id> --confirm-suggestions`: sends `confirm_suggestions: true` on `PATCH /broker/submissions/{id}/answers`, confirming every value Hedge suggests (a class, for example) as it stands; alone or with `--set` answers. `status` and the other flow commands print it as the next step when Hedge has suggestions.
+- `npm test`: the `answer` request body checked against a local mock API.
+
 ## [0.5.0] - 2026-10-30
 
 The instant-quote flow. Files created over the API reach Hedge Instant Quote

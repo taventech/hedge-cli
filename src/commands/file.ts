@@ -249,17 +249,21 @@ export function registerFile(program: Command): void {
 
   program
     .command("answer <submissionId>")
-    .summary("Answer what the markets need (--set key=value)")
-    .description("Answer what the markets still need. All or nothing: a refused answer saves none and says why")
+    .summary("Answer what the markets need (--set key=value, --confirm-suggestions)")
+    .description(
+      "Answer what the markets still need, and confirm the values Hedge suggests (a class, for example). All or nothing: a refused answer saves none and says why",
+    )
     .option("--set <answer...>", SET_HELP)
-    .option("--file <path|->", "a JSON body {shared_answers, answers} from a file, or - for stdin; --set wins per key")
+    .option("--confirm-suggestions", "confirm every value Hedge suggests as it stands (confirm_suggestions); answer one with --set to pick another")
+    .option("--file <path|->", "a JSON body {shared_answers, answers, confirm_suggestions} from a file, or - for stdin; --set wins per key")
     .option("--producer-email <email>", "the producing broker (required with an API key)")
     .action(async (submissionId, opts) => {
       const ctx = makeCtx(program.opts());
       const body: Record<string, any> = opts.file ? readJsonFile(opts.file, "--file") : {};
       mergeAnswers(body, parseSets(opts.set));
-      if (!Object.keys(body.shared_answers ?? {}).length && !Object.keys(body.answers ?? {}).length) {
-        throw new Error("nothing to answer: pass --set key=value (see hedge status for what is missing)");
+      if (opts.confirmSuggestions) body.confirm_suggestions = true;
+      if (!Object.keys(body.shared_answers ?? {}).length && !Object.keys(body.answers ?? {}).length && body.confirm_suggestions !== true) {
+        throw new Error("nothing to answer: pass --set key=value or --confirm-suggestions (see hedge status for what is missing)");
       }
       if (opts.producerEmail) body.producer_email = opts.producerEmail;
       const res = await apiRequest<any>(ctx.client, "PATCH", `/broker/submissions/${submissionId}/answers`, { body });
