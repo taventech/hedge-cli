@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import type { Command } from "commander";
 import { apiRequest, downloadRequest, sanitizeFilename, table, kv, printJson } from "../core/index.js";
@@ -19,19 +19,32 @@ function docFileName(prefix: string, d: any): string {
   return `${prefix}-${stem}${ext}`;
 }
 
-interface Doc { path: string; name: string }
+// path: a Hedge API route (sent with the token); url: a carrier-hosted https
+// PDF (fetched without it).
+interface Doc { path?: string; url?: string; name: string }
+
+function hostedPdf(u: unknown): string | null {
+  try {
+    const url = new URL(String(u));
+    return url.protocol === "https:" && /\.pdf$/i.test(url.pathname) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 // Every stored PDF on the read: each quote's documents (Hedge's quote PDF
 // first, then the carrier's) and each lane's carrier originals. Carrier-hosted
 // links are listed, not fetched.
-function collectDocs(res: any): { docs: Doc[]; links: string[] } {
+function collectDocs(res: any): { docs: Doc[]; links: string[]; pending: boolean } {
   const docs: Doc[] = [];
   const links: string[] = [];
   const seen = new Set<string>();
   const names = new Set<string>();
   const add = (prefix: string, d: any) => {
-    if (d.download_path && !seen.has(d.download_path)) {
-      seen.add(d.download_path);
+    const remote = d.download_path ? null : hostedPdf(d.carrier_url);
+    const key = d.download_path ?? remote;
+    if (key && !seen.has(key)) {
+      seen.add(key);
       // Two documents can share a name (same file_name or kind): number the
       // later ones so none overwrites another.
       const first = docFileName(prefix, d);
@@ -40,17 +53,30 @@ function collectDocs(res: any): { docs: Doc[]; links: string[] } {
       let name = first;
       for (let n = 2; names.has(name); n++) name = `${stem}-${n}${ext}`;
       names.add(name);
-      docs.push({ path: d.download_path, name });
-    } else if (!d.download_path && d.carrier_url) {
+      docs.push(d.download_path ? { path: d.download_path, name } : { url: remote!, name });
+    } else if (!key && d.carrier_url) {
       links.push(`${prefix}: ${d.carrier_url}`);
     }
   };
+  let pending = false;
   for (const lane of res.lanes ?? []) {
     const market = slug(lane.market?.display_name);
-    for (const q of lane.quotes ?? []) for (const d of q.documents ?? []) add(`${market}-${String(q.quote_id).slice(0, 8)}`, d);
+    for (const q of lane.quotes ?? []) {
+      // Hedge prepares its quote PDF on the first read after release.
+      if (!(q.documents ?? []).some((d: any) => d.kind === "hedge_quote_pdf")) pending = true;
+      for (const d of q.documents ?? []) add(`${market}-${String(q.quote_id).slice(0, 8)}`, d);
+    }
     for (const d of lane.carrier_originals ?? []) add(`${market}-original`, d);
   }
-  return { docs, links };
+  return { docs, links, pending };
+}
+
+async function fetchHostedPdf(url: string, target: string): Promise<string> {
+  const res = await fetch(url);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  if (!res.ok || bytes.subarray(0, 5).toString() !== "%PDF-") throw new Error(`${url} did not return a PDF (${res.status})`);
+  writeFileSync(target, bytes);
+  return target;
 }
 
 export function registerQuotes(program: Command): void {
@@ -58,19 +84,24 @@ export function registerQuotes(program: Command): void {
     .command("quotes <submissionId>")
     .summary("Itemized quotes; --download saves every PDF")
     .description("The quotes on a file, itemized: premium, total, whether it can be bound, its documents. --download saves every PDF")
-    .option("--download [dir]", "save every quote PDF (Hedge's quote PDF and the carrier's) into dir (default: current directory)")
+    .option("--download [dir]", "save every quote PDF (Hedge's quote PDF and the carrier's, including carrier-hosted PDFs) into dir (default: current directory)")
     .action(async (submissionId, opts) => {
       const ctx = makeCtx(program.opts());
       const res = await apiRequest<any>(ctx.client, "GET", `/broker/submissions/${submissionId}/quotes`);
 
       const saved: string[] = [];
       let links: string[] = [];
+      let pending = false;
       if (opts.download) {
         const dir = typeof opts.download === "string" ? opts.download : ".";
         mkdirSync(dir, { recursive: true });
         const found = collectDocs(res);
         links = found.links;
-        for (const d of found.docs) saved.push(await downloadRequest(ctx.client, "GET", d.path, join(dir, d.name)));
+        pending = found.pending;
+        for (const d of found.docs) {
+          const target = join(dir, d.name);
+          saved.push(d.path ? await downloadRequest(ctx.client, "GET", d.path, target) : await fetchHostedPdf(d.url!, target));
+        }
       }
       if (ctx.json) return printJson(opts.download ? { ...res, saved, carrier_links: links } : res);
 
@@ -97,7 +128,8 @@ export function registerQuotes(program: Command): void {
       process.stdout.write(table(rows, ["market", "program", "status", "quote_id", "premium", "total", "bind", "docs"]) + "\n");
       if (opts.download) {
         process.stdout.write(`\nSaved ${saved.length} document(s):\n` + saved.map((p) => "  " + p).join("\n") + "\n");
-        if (links.length) process.stdout.write("Carrier-hosted:\n" + links.map((l) => "  " + l).join("\n") + "\n");
+        if (links.length) process.stdout.write("Carrier-hosted pages:\n" + links.map((l) => "  " + l).join("\n") + "\n");
+        if (pending) process.stdout.write(`Hedge's quote PDF is being prepared; run this again in a few seconds to save it.\n`);
       } else if (rows.some((r) => r.quote_id)) {
         process.stdout.write(`\nSave the PDFs: hedge quotes ${submissionId} --download [dir]\nBind one:      hedge bind-link ${submissionId} <quote_id>\n`);
       }

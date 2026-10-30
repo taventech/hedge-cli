@@ -4,7 +4,7 @@ All notable changes to `hedge-broker` are documented here. This project follows
 [Semantic Versioning](https://semver.org) and
 [Keep a Changelog](https://keepachangelog.com).
 
-## [0.5.0] - Unreleased
+## [0.5.0] - 2026-10-30
 
 The instant-quote flow. Files created over the API reach Hedge Instant Quote
 markets only, and the commands follow the flow: appetite, requirements,
@@ -17,9 +17,10 @@ writes are refused with where to email them (`email_us`).
 - `requirements --state --lines [--programs ids]`: `POST /broker/requirements`, the core fields plus each market's own questions, with the `--set` target for each. Without `--programs` it uses every market `appetite` returns.
 - `create` (alias `submit`): `POST /broker/submissions` with `--programs`, `--set` answers, `--client-reference`, `--quote` and `--file` for the full JSON body.
 - `status <id> [--wait]`: `GET /broker/submissions/{id}/instant-quotes`, each market's state, missing answers and Hedge's suggestions.
+- `business <id>`: `PATCH /broker/submissions/{id}/business`, correct the file's core facts (name, mailing address, contact, class, effective date) when `status` says a core field is missing; the markets re-prepare.
 - `answer <id> --set k=v [--file]`: `PATCH /broker/submissions/{id}/answers`. `key=value` answers a canonical key for every market; `<program_id>:<id>=value` one market's own question; numbers and true/false are typed; `key:=<json>` sends exact JSON.
 - `quote <id> [--programs] [--wait]`: `POST /broker/submissions/{id}/quote`, with the per-market outcome (exit 1 on a 409).
-- `quotes <id> [--download [dir]]`: the itemized `GET /broker/submissions/{id}/quotes`; `--download` saves every stored quote PDF (Hedge's quote PDF and the carrier's).
+- `quotes <id> [--download [dir]]`: the itemized `GET /broker/submissions/{id}/quotes`; `--download` saves every quote PDF: Hedge's quote PDF, the carrier PDFs Hedge stored and carrier-hosted PDFs (fetched without your token); other carrier-hosted pages are listed.
 - `bind-link <id> <quoteId> [--for broker|insured]`: `POST .../quotes/{quote_id}/bind-link`.
 - `events [--since]`: the brokerage-wide `GET /broker/events` feed, following `next_cursor` to the tail.
 - `--sandbox` (or `HEDGE_ENV=sandbox`): sandbox-api.hedgespecialty.com, with its own stored sign-in.

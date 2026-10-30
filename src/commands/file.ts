@@ -199,6 +199,55 @@ export function registerFile(program: Command): void {
     });
 
   program
+    .command("business <submissionId>")
+    .summary("Correct the business: name, address, contact, class, effective date")
+    .description(
+      "Correct the file's core facts (PATCH /broker/submissions/{id}/business): the record changes, every market's copy follows and the markets re-prepare. Use it when hedge status says to set a core field",
+    )
+    .option("--insured <name>", "legal business name")
+    .option("--address <line1>", "mailing address line 1 (with --city, --state and --zip)")
+    .option("--address2 <line2>", "mailing address line 2")
+    .option("--city <city>", "mailing address city")
+    .option("--state <ST>", "mailing address state")
+    .option("--zip <zip>", "mailing address ZIP code")
+    .option("--contact-name <name>", "primary contact name")
+    .option("--contact-email <email>", "primary contact email (the insured's, not the broker's)")
+    .option("--contact-phone <phone>", "primary contact phone")
+    .option("--effective <date>", "requested effective date, YYYY-MM-DD")
+    .option("--naics <code>", "6-digit NAICS")
+    .option("--description <text>", "what the business does (with --naics)")
+    .option("--producer-email <email>", "the producing broker (required with an API key)")
+    .action(async (submissionId, opts) => {
+      const ctx = makeCtx(program.opts());
+      const body: Record<string, any> = {};
+      if (opts.insured) body.insured_name = opts.insured;
+      const address: Record<string, string> = {};
+      if (opts.address) address.line1 = opts.address;
+      if (opts.address2) address.line2 = opts.address2;
+      if (opts.city) address.city = opts.city;
+      if (opts.state) address.state = String(opts.state).trim().toUpperCase();
+      if (opts.zip) address.zip = opts.zip;
+      if (Object.keys(address).length) {
+        const missing = ["line1", "city", "state", "zip"].filter((k) => !address[k]);
+        if (missing.length) throw new Error("--address, --city, --state and --zip go together (missing " + missing.join(", ") + ")");
+        body.mailing_address = address;
+      }
+      const contact: Record<string, string> = {};
+      if (opts.contactName) contact.name = opts.contactName;
+      if (opts.contactEmail) contact.email = opts.contactEmail;
+      if (opts.contactPhone) contact.phone = opts.contactPhone;
+      if (Object.keys(contact).length) body.contact = contact;
+      if (opts.effective) body.effective_date = opts.effective;
+      if (opts.description && !opts.naics) throw new Error("--description goes with --naics");
+      if (opts.naics) body.classification = { naics: String(opts.naics).trim(), ...(opts.description ? { description: opts.description } : {}) };
+      if (!Object.keys(body).length) throw new Error("nothing to change: pass at least one field");
+      if (opts.producerEmail) body.producer_email = opts.producerEmail;
+      const res = await apiRequest<any>(ctx.client, "PATCH", `/broker/submissions/${submissionId}/business`, { body });
+      if (ctx.json) return printJson(res);
+      process.stdout.write(`Updated. The markets re-prepare; follow them with: hedge status ${submissionId} --wait\n`);
+    });
+
+  program
     .command("answer <submissionId>")
     .summary("Answer what the markets need (--set key=value)")
     .description("Answer what the markets still need. All or nothing: a refused answer saves none and says why")

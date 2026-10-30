@@ -107,8 +107,9 @@ Email it to Hedge instead:
 | `hedge intake [files...] [--text t\|--text-file path\|-] [--insured] [--lines] [--state] [--effective] [--programs] [--client-reference] [--quote]` | Create a file from documents and/or text (up to 20 files, 15 MB each, 60 MB total). Hedge reads them and prefills the applications. |
 | `hedge status <id> [--wait] [--timeout min]` | Each market's state and what it still needs. `--wait` polls every 5 seconds until no market is preparing or quoting. |
 | `hedge answer <id> --set k=v ... [--file answers.json]` | Answer what the markets need. |
+| `hedge business <id> [--insured] [--address --city --state --zip] [--contact-name] [--contact-email] [--contact-phone] [--effective] [--naics [--description]]` | Correct the file's core facts when `hedge status` says a core field is missing (the insured's contact, for example). The markets re-prepare. |
 | `hedge quote <id> [--programs ids] [--wait]` | Request quotes from the ready markets. A market that still needs answers says what (exit code 1 when none could be requested). |
-| `hedge quotes <id> [--download [dir]]` | The itemized quotes: premium, total, whether each can be bound, its documents. `--download` saves every PDF: Hedge's quote PDF and the carrier's. Carrier-hosted links are listed. |
+| `hedge quotes <id> [--download [dir]]` | The itemized quotes: premium, total, whether each can be bound, its documents. `--download` saves every PDF: Hedge's quote PDF and the carrier's, including carrier-hosted PDFs. Other carrier-hosted pages (an online proposal) are listed. |
 | `hedge bind-link <id> <quoteId> [--for broker\|insured] [--insured-email e] [--attest]` | The link to bind: the broker's bind checklist in the Hedge portal, or the insured's pay-and-bind page where the market takes the insured's payment. |
 | `hedge events [--since cursor] [--limit n] [--one-page]` | What changed across all your brokerage's files, oldest first. Prints the cursor to resume from. |
 | `hedge submissions [--status s] [--search q] [--limit n] [--offset n] [--updated-since iso]` | List your brokerage's files. |
@@ -146,7 +147,7 @@ The CLI never retries on its own.
 
 Reading (appetite, requirements, your files, quotes, documents, events) is open to every brokerage. Creating, answering, quoting and bind links need submit access, which Hedge turns on per brokerage; request it in the portal under **Settings → API keys**. `hedge login` and `hedge whoami` say when a token is read-only.
 
-An API key carries no broker identity, so writes made with one name the producing broker: pass `--producer-email` on `create`, `intake`, `answer`, `quote`, `bind-link` and `withdraw`.
+An API key carries no broker identity, so writes made with one name the producing broker: pass `--producer-email` on `create`, `intake`, `business`, `answer`, `quote`, `bind-link` and `withdraw`.
 
 Every request sends `Hedge-Client: hedge-cli/<version>`. Credentials are stored per environment at `~/.config/taven-cli/hedge.<environment>.json` with `0600` permissions.
 

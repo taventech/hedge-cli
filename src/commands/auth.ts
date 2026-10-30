@@ -48,7 +48,7 @@ export function registerAuth(program: Command): void {
         process.stdout.write(
           `Signed in to ${ctx.env.name} with API key ${clientId}` +
             (r.scope ? ` (scope: ${r.scope})` : "") +
-            ".\nWrites made with an API key name the producing broker: pass --producer-email on create, intake, answer, quote, bind-link and withdraw.\n" +
+            ".\nWrites made with an API key name the producing broker: pass --producer-email on create, intake, business, answer, quote, bind-link and withdraw.\n" +
             accessNote(r.scope),
         );
         return;
@@ -82,15 +82,12 @@ export function registerAuth(program: Command): void {
       if (ctx.json) return printJson(me);
       const b = (me.brokerage ?? {}) as Record<string, unknown>;
       const scope = loadToken(ctx.cfg)?.scope ?? "";
-      process.stdout.write(
-        kv({
-          environment: ctx.env.name,
-          email: me.email,
-          name: me.full_name,
-          brokerage: b.name,
-          role: me.role,
-          scope,
-        }) + "\n" + accessNote(scope),
+      // An API key has no user: show only the fields the server returned.
+      const rows = Object.fromEntries(
+        Object.entries({ environment: ctx.env.name, email: me.email, name: me.full_name, brokerage: b.name, role: me.role, scope }).filter(
+          ([, v]) => v != null && v !== "",
+        ),
       );
+      process.stdout.write(kv(rows) + "\n" + accessNote(scope));
     });
 }
