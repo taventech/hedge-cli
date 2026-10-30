@@ -66,6 +66,10 @@ Each market on a file has one state: `preparing` (Hedge is building its applicat
 
 Pass `--quote` on `create` or `intake` to have every market quote as soon as it is ready.
 
+## Claude skill
+
+[`skills/hedge-broker`](skills/hedge-broker) teaches Claude the same flow over Hedge's MCP connector. It checks instant appetite, asks the client only the questions the markets need (once), creates the file, quotes it, and hands back PDFs and a bind link. Its [README](skills/hedge-broker/README.md) covers setup in Claude Code, claude.ai and headless agents.
+
 ## Answers: `--set`
 
 `hedge create` and `hedge answer` take answers with `--set`, repeatable:

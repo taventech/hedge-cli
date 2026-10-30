@@ -33,3 +33,14 @@ jobs:
           npm install "$GITHUB_WORKSPACE/$tgz"
           ./node_modules/.bin/hedge --version
           ./node_modules/.bin/hedge --help >/dev/null
+
+  skill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # claude.ai uploads the zip; it must carry exactly skills/hedge-broker/SKILL.md.
+      - name: Claude skill package matches SKILL.md
+        run: |
+          set -e
+          test "$(unzip -Z1 skills/hedge-broker.zip)" = "hedge-broker/SKILL.md"
+          unzip -p skills/hedge-broker.zip hedge-broker/SKILL.md | diff - skills/hedge-broker/SKILL.md
