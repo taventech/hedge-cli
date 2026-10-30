@@ -103,7 +103,7 @@ export function registerQuotes(program: Command): void {
           saved.push(d.path ? await downloadRequest(ctx.client, "GET", d.path, target) : await fetchHostedPdf(d.url!, target));
         }
       }
-      if (ctx.json) return printJson(opts.download ? { ...res, saved, carrier_links: links } : res);
+      if (ctx.json) return printJson(opts.download ? { ...res, saved, carrier_links: links, hedge_quote_pdf_pending: pending } : res);
 
       const rows: Record<string, unknown>[] = [];
       for (const lane of res.lanes ?? []) {

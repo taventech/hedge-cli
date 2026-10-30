@@ -149,7 +149,7 @@ export function renderFileState(fs: any): string {
       for (const item of m.missing) {
         const target = setTarget(m.program_id, item);
         const what = `${item.label ?? item.key ?? item.id}${item.message ? ". " + item.message : ""}`;
-        out.push(target ? `    --set ${target}=...   ${what}` : `    (file) ${what}`);
+        out.push(target ? `    --set ${target}=...   ${what}` : `    hedge business ${id} ...   ${what}`);
       }
     }
   }
@@ -169,6 +169,7 @@ export function renderFileState(fs: any): string {
   const next: string[] = [];
   if (markets.some((m) => m.state === "preparing" || m.state === "quoting")) next.push(`hedge status ${id} --wait`);
   if (gaps.length || fs.suggested?.length) next.push(`hedge answer ${id} --set key=value ...`);
+  if (gaps.some((m) => m.missing.some((item: any) => !setTarget(m.program_id, item)))) next.push(`hedge business ${id} ...  (core facts: name, address, contact, class, effective date)`);
   if (!fs.automatic_quoting && markets.some((m) => m.state === "ready")) next.push(`hedge quote ${id}`);
   if (markets.some((m) => m.state === "quoted")) next.push(`hedge quotes ${id} --download`, `hedge bind-link ${id} <quote_id>`);
   if (next.length) out.push("", "Next: " + next.join("\n      "));
@@ -189,6 +190,10 @@ export function describeError(err: ApiError): string {
       if (!Array.isArray(list) || !list.length) continue;
       out.push("");
       for (const e of list) out.push(`  ${e.program_id ? e.program_id + ":" : ""}${e.key ?? e.id ?? ""}: ${e.message ?? e.label ?? ""}`);
+    }
+    // An answer refused because it is a core fact of the file.
+    if ((detail.errors ?? []).some((e: any) => /core field/i.test(String(e.message ?? "")))) {
+      out.push("", "Core facts (name, mailing address, contact, class, effective date) are corrected with hedge business <id>; see hedge business --help.");
     }
     if (Array.isArray(detail.assumptions) && detail.assumptions.length) {
       out.push("", "Hedge quoted on these assumptions. The retail agent must confirm each one:");
